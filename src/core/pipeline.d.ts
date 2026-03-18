@@ -59,4 +59,5 @@ export declare class Pipeline {
     private normalizePath;
     private emitStage;
     private log;
+    private detectUnexpectedOperations;
 }

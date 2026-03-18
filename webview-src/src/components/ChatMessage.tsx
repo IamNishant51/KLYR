@@ -22,9 +22,7 @@ function ChatMessage({ message, streaming, animateOnAppear = false, draftActions
   const [visibleContent, setVisibleContent] = useState(message.content);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
-  const compact = layoutMode !== 'regular';
   const narrow = layoutMode === 'narrow';
-  const wrapperMaxWidth = narrow ? 'max-w-full' : compact ? 'max-w-[96%]' : 'max-w-[92%]';
 
   useEffect(() => {
     const shouldTypeAnimate = streaming || (animateOnAppear && message.role === 'assistant');
@@ -63,151 +61,137 @@ function ChatMessage({ message, streaming, animateOnAppear = false, draftActions
 
   const renderedContent = (streaming || (animateOnAppear && message.role === 'assistant')) ? visibleContent : message.content;
   const segments = parseMessageContent(renderedContent);
-  const lastTextSegmentIndex = findLastTextSegmentIndex(segments);
+
+  if (isSystem) {
+    return (
+      <div className="klyr-fade-up flex justify-center py-2">
+        <span className="text-xs" style={{ color: 'var(--k-muted)' }}>
+          {message.content}
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <article
-      className={`klyr-fade-up flex w-full ${
-        isSystem ? 'justify-center' : isUser ? 'justify-end' : 'justify-start'
-      }`}
-    >
-      <div
-        className={`flex w-full ${wrapperMaxWidth} flex-col gap-2 ${
-          isSystem ? 'items-center' : isUser ? 'items-end' : 'items-start'
-        }`}
-      >
-        {!isSystem && (
-          <div className={`px-1 font-medium uppercase tracking-[0.22em] ${narrow ? 'text-[10px]' : 'text-[11px]'}`} style={{ color: 'var(--k-muted)' }}>
-            {isUser ? 'You' : 'Klyr'}
+    <div className={`klyr-fade-up group relative flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+      {!isUser && (
+        <div className="klyr-fade-up absolute -left-12 top-0 flex items-center justify-center" style={{ animationDelay: '0.1s' }}>
+          <div 
+            className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
+            style={{ 
+              background: 'linear-gradient(135deg, var(--k-accent), color-mix(in srgb, var(--k-accent) 60%, var(--k-surface)))',
+              color: '#fff'
+            }}
+          >
+            K
           </div>
-        )}
-
+        </div>
+      )}
+      
+      <div className={`flex max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+        <div 
+          className={`mb-1 px-1 text-[11px] font-medium uppercase tracking-wider ${narrow ? 'text-[10px]' : ''}`} 
+          style={{ color: 'var(--k-muted)' }}
+        >
+          {isUser ? 'You' : 'Klyr'}
+        </div>
+        
         <div
-          className={
-            isSystem
-              ? 'w-fit max-w-full rounded-full border px-4 py-2 text-xs'
-              : isUser
-              ? `w-fit max-w-full ${narrow ? 'space-y-2.5 rounded-[20px] border px-3 py-2.5 text-[13px] leading-6' : compact ? 'space-y-2.5 rounded-[22px] border px-3.5 py-2.5 text-[13px] leading-6' : 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'}`
-              : `w-fit max-w-full ${narrow ? 'space-y-2.5 rounded-[20px] border px-3 py-2.5 text-[13px] leading-6' : compact ? 'space-y-2.5 rounded-[22px] border px-3.5 py-2.5 text-[13px] leading-6' : 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'}`
-          }
-          style={
-            isSystem
-              ? {
-                  borderColor: 'var(--k-input-border)',
-                  background: 'color-mix(in srgb, var(--k-input-bg) 62%, transparent)',
-                  color: 'var(--k-muted)',
-                }
-              : isUser
-              ? {
-                  borderColor: 'color-mix(in srgb, var(--k-accent) 34%, transparent)',
-                  background: 'color-mix(in srgb, var(--k-selection) 52%, var(--k-surface) 48%)',
-                  color: 'var(--k-fg)',
-                  boxShadow: '0 14px 34px color-mix(in srgb, var(--k-bg) 56%, transparent)',
-                }
-              : {
-                  borderColor: 'var(--k-input-border)',
-                  background: 'color-mix(in srgb, var(--k-surface) 86%, transparent)',
-                  color: 'var(--k-fg)',
-                  boxShadow: '0 16px 36px color-mix(in srgb, var(--k-bg) 54%, transparent)',
-                }
-          }
+          className={`w-full ${isUser ? '' : ''}`}
         >
           {segments.length === 0 ? (
-            <div className="flex items-center gap-2" style={{ color: 'var(--k-muted)' }}>
-              <span className="h-2 w-2 animate-klyr-pulse rounded-full" style={{ background: 'var(--k-accent)' }} />
-              <span className="h-2 w-2 animate-klyr-pulse rounded-full [animation-delay:120ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 68%, transparent)' }} />
-              <span className="h-2 w-2 animate-klyr-pulse rounded-full [animation-delay:240ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 38%, transparent)' }} />
+            <div className="flex items-center gap-2 py-3">
+              <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full" style={{ background: 'var(--k-accent)' }} />
+              <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full [animation-delay:120ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 68%, transparent)' }} />
+              <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full [animation-delay:240ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 38%, transparent)' }} />
             </div>
           ) : (
-            segments.map((segment, segmentIndex) => {
-              if (segment.type === 'code') {
-                const treatAsMarkdown = shouldRenderAsMarkdown(segment.language, segment.content);
-                if (treatAsMarkdown) {
-                  const showCursor = streaming && segmentIndex === segments.length - 1;
+            <div className={`${isUser ? 'inline-block rounded-lg px-4 py-3' : 'w-full'}`}
+              style={
+                isUser 
+                  ? { 
+                      background: 'linear-gradient(135deg, color-mix(in srgb, var(--k-accent) 85%, var(--k-surface)), color-mix(in srgb, var(--k-accent) 70%, var(--k-surface)))',
+                      color: '#ffffff',
+                      boxShadow: '0 4px 20px color-mix(in srgb, var(--k-accent) 30%, transparent)'
+                    }
+                  : {}
+              }
+            >
+              {segments.map((segment, segmentIndex) => {
+                if (segment.type === 'code') {
+                  const treatAsMarkdown = shouldRenderAsMarkdown(segment.language, segment.content);
+                  if (treatAsMarkdown) {
+                    return (
+                      <div
+                        key={`${message.id}-markdown-${segmentIndex}`}
+                        className="space-y-1.5"
+                      >
+                        <MarkdownText
+                          compact={narrow}
+                          content={segment.content}
+                          showCursor={streaming && segmentIndex === segments.length - 1}
+                        />
+                      </div>
+                    );
+                  }
+
                   return (
-                    <div
-                      key={`${message.id}-markdown-${segmentIndex}`}
-                      className={`${narrow ? 'space-y-2.5' : 'space-y-3'} ${!isUser ? `${narrow ? 'border-l pl-2.5' : 'border-l pl-3'}` : ''}`}
-                      style={!isUser ? { borderColor: 'color-mix(in srgb, var(--k-accent) 28%, transparent)' } : undefined}
-                    >
-                      <MarkdownText
-                        compact={compact}
-                        content={segment.content}
-                        showCursor={showCursor}
-                      />
-                    </div>
+                    <CodeBlock
+                      key={`${message.id}-code-${segmentIndex}`}
+                      language={segment.language}
+                      code={segment.content}
+                      compact={narrow}
+                      onApply={segmentIndex === 0 ? draftActions?.onApply : undefined}
+                      onViewDiff={segmentIndex === 0 ? draftActions?.onOpenDiff : undefined}
+                    />
                   );
                 }
 
+                const showCursor = streaming && segmentIndex === segments.length - 1;
+
                 return (
-                  <CodeBlock
-                    key={`${message.id}-code-${segmentIndex}`}
-                    language={segment.language}
-                    code={segment.content}
-                    compact={compact}
-                    onApply={segmentIndex === 0 ? draftActions?.onApply : undefined}
-                    onViewDiff={segmentIndex === 0 ? draftActions?.onOpenDiff : undefined}
-                  />
+                  <div key={`${message.id}-text-${segmentIndex}`} className="space-y-1.5">
+                    {isUser ? (
+                      <p 
+                        className={`whitespace-pre-wrap break-words leading-[1.5] ${narrow ? 'text-[13px]' : 'text-[14px]'}`}
+                      >
+                        {segment.content}
+                        {showCursor ? <span className="klyr-cursor ml-1 inline-block h-4 w-[3px] align-middle" /> : null}
+                      </p>
+                    ) : (
+                      <MarkdownText
+                        compact={narrow}
+                        content={segment.content}
+                        showCursor={showCursor}
+                      />
+                    )}
+                  </div>
                 );
-              }
+              })}
 
-              const showCursor =
-                streaming &&
-                segmentIndex === lastTextSegmentIndex;
-
-              return (
-                <div
-                  key={`${message.id}-text-${segmentIndex}`}
-                  className={`${narrow ? 'space-y-2.5' : 'space-y-3'} ${!isUser ? `${narrow ? 'border-l pl-2.5' : 'border-l pl-3'}` : ''}`}
-                  style={!isUser ? { borderColor: 'color-mix(in srgb, var(--k-accent) 28%, transparent)' } : undefined}
-                >
-                  {!isUser ? (
-                    <MarkdownText
-                      compact={compact}
-                      content={segment.content}
-                      showCursor={showCursor}
-                    />
-                  ) : (
-                    segment.content.split(/\n{2,}/).map((paragraph, paragraphIndex, paragraphs) => {
-                      const showParagraphCursor =
-                        showCursor &&
-                        paragraphIndex === paragraphs.length - 1;
-
-                      return (
-                        <p
-                          key={`${message.id}-paragraph-${segmentIndex}-${paragraphIndex}`}
-                          className={`whitespace-pre-wrap break-words ${narrow ? 'leading-6' : 'leading-7'}`}
-                        >
-                          {paragraph}
-                          {showParagraphCursor ? <span className="klyr-cursor ml-1 align-middle" /> : null}
-                        </p>
-                      );
-                    })
-                  )}
-                </div>
-              );
-            })
-          )}
-
-          {segments.length > 0 && streaming && lastTextSegmentIndex === -1 ? (
-            <div className="pt-1">
-              <span className="klyr-cursor align-middle" />
+              {segments.length > 0 && streaming ? (
+                <span className="klyr-cursor ml-1 inline-block h-4 w-[3px] align-middle" />
+              ) : null}
             </div>
-          ) : null}
+          )}
         </div>
       </div>
-    </article>
+
+      {isUser && (
+        <div className="klyr-fade-up absolute -right-12 top-0 flex items-center justify-center" style={{ animationDelay: '0.1s' }}>
+          <div 
+            className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold"
+            style={{ 
+              background: 'linear-gradient(135deg, #5865F2, #7289DA)',
+              color: '#fff'
+            }}
+          >
+            Y
+          </div>
+        </div>
+      )}
+    </div>
   );
-}
-
-function findLastTextSegmentIndex(segments: ReturnType<typeof parseMessageContent>): number {
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    if (segments[index].type === 'text') {
-      return index;
-    }
-  }
-
-  return -1;
 }
 
 function shouldRenderAsMarkdown(language: string, content: string): boolean {
@@ -215,11 +199,9 @@ function shouldRenderAsMarkdown(language: string, content: string): boolean {
   if (!['markdown', 'md', 'mdx'].includes(normalizedLanguage)) {
     return false;
   }
-
   if (!content.trim()) {
     return false;
   }
-
   return true;
 }
 

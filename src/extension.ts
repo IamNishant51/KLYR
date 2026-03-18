@@ -45,6 +45,12 @@ interface RuntimeContext {
   workspaceIndex: WorkspaceIndex;
 }
 
+interface ExternalKnowledge {
+  title: string;
+  content: string;
+  source: 'internet' | 'wikipedia';
+}
+
 const SESSION_STATE_KEY = 'klyr.chatSession';
 const MEMORY_STATE_KEY = 'klyr.memoryEntries';
 const CHAT_HISTORY_STATE_KEY = 'klyr.chatHistory';
@@ -1058,6 +1064,22 @@ class KlyrExtensionController {
         };
         documentsForPipeline = [orchestratedDocument, ...runtime.documents];
       }
+
+      const externalKnowledge = await this.fetchExternalKnowledgeForPrompt(prompt);
+      if (externalKnowledge.length > 0) {
+        const externalDocs: ContextDocument[] = externalKnowledge.map((entry, index) => ({
+          id: `klyr-external-${Date.now()}-${index}`,
+          uri: `external://${entry.source}/${index}`,
+          title: entry.title,
+          content: this.trimExternalKnowledge(entry.content, 8000),
+          updatedAt: Date.now(),
+          source: 'memory',
+          tags: ['external', entry.source],
+        }));
+        documentsForPipeline = [...externalDocs, ...documentsForPipeline];
+        this.setStatus('retrieving', `Enriched context with ${externalKnowledge.length} external source(s) (internet/Wikipedia).`);
+        this.syncWebview();
+      }
     } catch (error) {
       this.logger.warn(
         `Context orchestration failed, using baseline retrieval: ${error instanceof Error ? error.message : String(error)}`
@@ -1149,19 +1171,21 @@ class KlyrExtensionController {
 
       const staged = await this.stagePreviewEdits(result.preview, runtime.workspaceRoot);
 
-      const planSummary = result.plan ? `Plan: ${result.plan.summary}` : 'Plan ready.';
-      const rationale = result.preview.rationale || result.preview.summary;
-      const changesSummary = `Files: ${result.preview.changes.length} change(s) | +${result.preview.totalAdditions} -${result.preview.totalDeletions}`;
-      
+      const planSummary = result.plan
+        ? `- **Intent**: ${result.plan.intent}\n- **Mode**: ${result.plan.mode}\n- **Write required**: ${result.plan.requiresWrite ? 'yes' : 'no'}`
+        : '- Plan ready.';
+      const rationale = result.preview.rationale || result.preview.summary || 'No rationale provided.';
+      const stagedPaths = result.preview.changes.map((change) => change.path);
+
       this.appendMessage(
         'assistant',
-        `${planSummary}\n\nReasoning: ${rationale}\n\n${changesSummary}\n\nPrepared ${staged.stagedCount} file edit(s) in the editor. Review changes, then click Keep to accept or Undo to reject.`
+        `## Plan\n${planSummary}\n\n## Reasoning\n- ${rationale}\n\n## Changes\n- **Files**: ${result.preview.changes.length} change(s)\n- **Line impact**: +${result.preview.totalAdditions} -${result.preview.totalDeletions}\n- **Staged in editor**: ${staged.stagedCount} file edit(s)\n- **Paths**: ${this.formatFilePathList(stagedPaths)}\n\nReview the staged file edits, then click **Keep** to accept or **Undo** to reject.`
       );
 
       if (staged.errors.length > 0) {
         this.appendMessage(
           'assistant',
-          `Some files could not be staged in-editor and will be finalized on Keep: ${staged.errors.join(', ')}`
+          `## Staging warnings\n- Some files could not be staged in-editor.\n- They will be finalized on **Keep**.\n- **Details**: ${staged.errors.join(' | ')}`
         );
       }
       
@@ -1303,8 +1327,11 @@ class KlyrExtensionController {
           ? `The AI did not generate code changes: ${preview.rationale.slice(0, 200)}`
           : 'The AI did not generate any code changes. Please try being more specific about what you want changed.';
         
-        this.appendMessage('assistant', errorMessage);
-        this.appendMessage('assistant', 'Tips: \n• Be specific about what to change\n• Mention the exact file name\n• Describe the exact change (e.g., "add error handling to line 5")');
+        this.appendMessage('assistant', `## No changes generated\n- ${errorMessage}`);
+        this.appendMessage(
+          'assistant',
+          '## Tips\n- Be specific about what to change.\n- Mention the exact file name (for example, `cli.py`).\n- Describe the exact change (for example, "add error handling to line 5").'
+        );
         this.setStatus('idle', 'No changes generated');
         await this.persistState();
         this.syncWebview();
@@ -1392,7 +1419,7 @@ class KlyrExtensionController {
         backupPaths.length > 0 ? `\n\nBackups saved at: ${backupPaths.join(', ')}` : '';
       this.appendMessage(
         'assistant',
-        `Applied ${applyResult.applied} file(s) with ${applyResult.errors.length} error(s):\n${details}${restoreInfo}`
+        `## Apply result\n- **Applied**: ${applyResult.applied} file(s)\n- **Errors**: ${applyResult.errors.length}\n- **Details**:\n${details.split('\n').map((line) => `  - ${line}`).join('\n')}${restoreInfo ? `\n- **Backups**: ${restoreInfo.replace(/^\n\nBackups saved at:\s*/, '')}` : ''}`
       );
       await this.recordDecisionMemory('error', applyResult.changedPaths);
     } else if (applyResult.applied === 0) {
@@ -1405,7 +1432,7 @@ class KlyrExtensionController {
     } else {
       this.appendMessage(
         'assistant',
-        `Applied ${applyResult.applied} change(s) successfully.\n\nFiles: ${applyResult.changedPaths.join(', ')}`
+        `## Applied successfully\n- **Changes**: ${applyResult.applied}\n- **Files**: ${this.formatFilePathList(applyResult.changedPaths)}`
       );
       await this.cleanupBackups(workspaceRoot);
       await this.recordDecisionMemory('success', applyResult.changedPaths);
@@ -1734,6 +1761,14 @@ class KlyrExtensionController {
     return references.slice(0, 10);
   }
 
+  private formatFilePathList(paths: string[]): string {
+    if (paths.length === 0) {
+      return '`none`';
+    }
+
+    return paths.map((pathValue) => `\`${pathValue}\``).join(', ');
+  }
+
   private appendMessage(role: UiChatMessage['role'], content: string): string {
     const messageId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.state.messages.push({
@@ -1813,6 +1848,196 @@ class KlyrExtensionController {
     if (typeof config.selectedModel === 'string' && config.selectedModel.trim()) {
       this.selectedModelOverride = config.selectedModel.trim();
     }
+  }
+
+  private shouldFetchExternalKnowledge(prompt: string): boolean {
+    return prompt.trim().length > 0;
+  }
+
+  private async fetchExternalKnowledgeForPrompt(prompt: string): Promise<ExternalKnowledge[]> {
+    if (!this.shouldFetchExternalKnowledge(prompt)) {
+      return [];
+    }
+
+    const results: ExternalKnowledge[] = [];
+    const wikipediaQuery = this.extractWikipediaQuery(prompt);
+
+    try {
+      const internet = await this.fetchInternetSearchSummary(prompt);
+      if (internet) {
+        results.push(internet);
+      }
+    } catch (error) {
+      this.logger.debug(
+        `Internet search enrichment skipped: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
+    // Keep Wikipedia as an optional high-signal enrichment source.
+    if (wikipediaQuery) {
+      try {
+        const wiki = await this.fetchWikipediaSummary(wikipediaQuery);
+        if (wiki) {
+          results.push(wiki);
+        }
+      } catch (error) {
+        this.logger.debug(
+          `Wikipedia enrichment skipped: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+
+    return results;
+  }
+
+  private extractWikipediaQuery(prompt: string): string | undefined {
+    const normalized = prompt.trim();
+    const quoted = normalized.match(/wikipedia\s+(?:for\s+)?["']([^"']+)["']/i);
+    if (quoted?.[1]) {
+      return quoted[1].trim();
+    }
+
+    const tail = normalized.match(/wikipedia\s+(?:for\s+)?(.+)/i);
+    if (!tail?.[1]) {
+      return undefined;
+    }
+
+    const value = tail[1]
+      .replace(/[?.!]+$/g, '')
+      .replace(/\b(search|lookup|find|about)\b/gi, '')
+      .trim();
+
+    return value || undefined;
+  }
+
+  private async fetchInternetSearchSummary(query: string): Promise<ExternalKnowledge | undefined> {
+    const params = new URLSearchParams({
+      q: query,
+      format: 'json',
+      no_html: '1',
+      skip_disambig: '1',
+      no_redirect: '1',
+    });
+
+    const url = `https://api.duckduckgo.com/?${params.toString()}`;
+    const response = await this.fetchJsonWithTimeout(url, 6000);
+    if (!response || typeof response !== 'object') {
+      return undefined;
+    }
+
+    const abstractText = String((response as Record<string, unknown>).AbstractText ?? '').trim();
+    const abstractUrl = String((response as Record<string, unknown>).AbstractURL ?? '').trim();
+    const heading = String((response as Record<string, unknown>).Heading ?? '').trim();
+    const relatedTopics = (response as Record<string, unknown>).RelatedTopics;
+
+    const lines: string[] = [];
+    if (heading) {
+      lines.push(`Heading: ${heading}`);
+    }
+    if (abstractText) {
+      lines.push(`Summary: ${abstractText}`);
+    }
+    if (abstractUrl) {
+      lines.push(`Source: ${abstractUrl}`);
+    }
+
+    if (Array.isArray(relatedTopics)) {
+      const topicLines = relatedTopics
+        .slice(0, 4)
+        .map((item) => {
+          if (!item || typeof item !== 'object') {
+            return '';
+          }
+          const text = String((item as Record<string, unknown>).Text ?? '').trim();
+          const firstUrl = String((item as Record<string, unknown>).FirstURL ?? '').trim();
+          if (!text) {
+            return '';
+          }
+          return firstUrl ? `- ${text} (${firstUrl})` : `- ${text}`;
+        })
+        .filter((value) => value.length > 0);
+
+      if (topicLines.length > 0) {
+        lines.push('Related:');
+        lines.push(...topicLines);
+      }
+    }
+
+    if (lines.length === 0) {
+      return undefined;
+    }
+
+    return {
+      title: `Internet search: ${query}`,
+      source: 'internet',
+      content: lines.join('\n'),
+    };
+  }
+
+  private async fetchWikipediaSummary(query: string): Promise<ExternalKnowledge | undefined> {
+    const normalized = query.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    const encoded = encodeURIComponent(normalized.replace(/ /g, '_'));
+    const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encoded}`;
+    const response = await this.fetchJsonWithTimeout(url, 6000);
+    if (!response || typeof response !== 'object') {
+      return undefined;
+    }
+
+    const payload = response as Record<string, unknown>;
+    const title = String(payload.title ?? '').trim();
+    const extract = String(payload.extract ?? '').trim();
+    const desktopPage =
+      payload.content_urls && typeof payload.content_urls === 'object'
+        ? (payload.content_urls as Record<string, unknown>).desktop
+        : undefined;
+    const pageUrl =
+      desktopPage && typeof desktopPage === 'object'
+        ? String((desktopPage as Record<string, unknown>).page ?? '').trim()
+        : '';
+
+    if (!extract) {
+      return undefined;
+    }
+
+    return {
+      title: `Wikipedia: ${title || normalized}`,
+      source: 'wikipedia',
+      content: `${extract}${pageUrl ? `\nSource: ${pageUrl}` : ''}`,
+    };
+  }
+
+  private async fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'Klyr-VSCode-Extension/1.0',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private trimExternalKnowledge(content: string, maxChars: number): string {
+    if (content.length <= maxChars) {
+      return content;
+    }
+    return `${content.slice(0, maxChars)}\n...<truncated external context>`;
   }
 
   private async clearChatState(): Promise<void> {

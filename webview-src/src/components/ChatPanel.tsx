@@ -174,52 +174,63 @@ function ChatPanel({
   return (
     <section className="flex min-h-0 flex-1 flex-col">
       <div
-        className="shrink-0 border-b backdrop-blur-xl"
+        className="klyr-glass-strong shrink-0 border-b"
         style={{
           borderColor: 'var(--k-border)',
-          background: 'color-mix(in srgb, var(--k-surface) 76%, transparent)',
         }}
       >
-        <div className={`mx-auto w-full max-w-5xl ${narrow ? 'px-2 py-2' : 'px-3 py-3 sm:px-4'}`}>
-          <div className={`klyr-fade-up px-1 ${narrow ? 'flex items-center gap-2' : 'flex items-center justify-between gap-2'}`}>
-            <div className={narrow ? 'flex w-full items-center justify-between gap-2' : 'contents'}>
-              <div
-                className={`inline-flex min-w-0 items-center gap-2 rounded-full border ${narrow ? 'flex-1 px-2.5 py-1.5 text-[11px]' : 'max-w-full px-3 py-1.5 text-xs'}`}
-                style={{
-                  borderColor: 'var(--k-input-border)',
-                  background: 'color-mix(in srgb, var(--k-input-bg) 62%, transparent)',
-                  color: 'var(--k-muted)',
-                }}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: 'var(--k-accent)', boxShadow: '0 0 0 5px color-mix(in srgb, var(--k-accent) 20%, transparent)' }}
-                />
-                <span className="truncate">{statusDetail || 'Answer ready.'}</span>
+        <div className="mx-auto w-full max-w-5xl px-4 py-2">
+          <div className="klyr-fade-up flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div>
+                <div className="text-sm font-semibold" style={{ color: 'var(--k-fg)' }}>Klyr</div>
+                <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--k-muted)' }}>
+                  <span 
+                    className="h-1.5 w-1.5 rounded-full animate-klyr-pulse"
+                    style={{ background: 'var(--k-accent)' }} 
+                  />
+                  {statusDetail || 'Ready'}
+                </div>
               </div>
+            </div>
 
-              <div className={`flex shrink-0 items-center ${narrow ? 'gap-1' : 'gap-2'}`}>
-                <ActionIconButton label="History" onClick={onOpenHistory} compact={compact}>
-                  <HistoryIcon />
-                </ActionIconButton>
-                <ActionIconButton label="New chat" onClick={onNewChat} compact={compact}>
-                  <NewChatIcon />
-                </ActionIconButton>
-                <ActionIconButton label="Settings" onClick={onOpenSettings} compact={compact}>
-                  <SettingsIcon />
-                </ActionIconButton>
-              </div>
+            <div className="flex items-center gap-2">
+              <ActionIconButton label="New chat" onClick={onNewChat} compact={compact}>
+                <NewChatIcon />
+              </ActionIconButton>
+              <ActionIconButton label="History" onClick={onOpenHistory} compact={compact}>
+                <HistoryIcon />
+              </ActionIconButton>
+              <ActionIconButton label="Settings" onClick={onOpenSettings} compact={compact}>
+                <SettingsIcon />
+              </ActionIconButton>
             </div>
           </div>
         </div>
       </div>
 
       <div ref={scrollerRef} onScroll={handleScroll} className="klyr-scrollbar flex-1 overflow-y-auto">
-        <div className={`mx-auto flex w-full max-w-5xl flex-col ${narrow ? 'gap-3 px-2 py-3' : 'gap-4 px-3 py-4 sm:px-4'}`}>
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4">
           {messages.length === 0 && !shouldShowThinkingBubble ? (
-            <div className={`klyr-fade-up flex items-center justify-center text-center ${narrow ? 'min-h-[28vh] px-3 py-8' : 'min-h-[40vh] px-6 py-12'}`}>
-              <div className={`klyr-welcome-shimmer flex items-center justify-center ${narrow ? 'h-20 w-20' : 'h-28 w-28'}`}>
+            <div className="klyr-fade-up flex h-full flex-col items-center justify-center gap-8">
+              <div className="animate-klyr-glow flex items-center justify-center">
                 <WelcomeLogo compact={narrow} />
+              </div>
+              <div className="text-center">
+                <h2 className="klyr-fade-up mb-2 text-lg font-medium" style={{ color: 'var(--k-fg)', animationDelay: '0.1s' }}>
+                  Welcome to Klyr
+                </h2>
+                <p className="klyr-fade-up text-sm" style={{ color: 'var(--k-muted)', animationDelay: '0.2s' }}>
+                  Your AI coding assistant, powered by local LLMs
+                </p>
+              </div>
+              <div className="klyr-fade-up grid grid-cols-2 gap-3 sm:grid-cols-3" style={{ animationDelay: '0.3s' }}>
+                <QuickAction label="Explain code" icon={<ExplainIcon />} />
+                <QuickAction label="Fix bugs" icon={<BugIcon />} />
+                <QuickAction label="Write tests" icon={<CheckIcon />} />
+                <QuickAction label="Refactor" icon={<RefactorIcon />} />
+                <QuickAction label="Optimize" icon={<BoltIcon />} />
+                <QuickAction label="Document" icon={<DocumentIcon />} />
               </div>
             </div>
           ) : showVirtualizedList ? (
@@ -267,7 +278,7 @@ function ChatPanel({
               ))}
             </div>
           ) : (
-            <div className={`space-y-3 ${narrow ? 'px-0.5' : 'px-1'}`}>
+            <div className="flex flex-col">
               {displayMessages.map((message) => (
                 message.id === SYNTHETIC_THINKING_ID ? (
                   <ThinkingTrace
@@ -303,125 +314,70 @@ function ChatPanel({
           )}
 
           {diffPreview.length > 0 ? (
-            <div id="klyr-diff-preview" className={`${narrow ? 'px-0.5' : 'px-1'}`}>
-              <div
-                className={`mb-3 rounded-[18px] border ${narrow ? 'px-3 py-2.5' : 'px-4 py-3'}`}
-                style={{
-                  borderColor: 'var(--k-input-border)',
-                  background: 'color-mix(in srgb, var(--k-input-bg) 56%, transparent)',
-                }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[10px] font-medium uppercase tracking-[0.22em]" style={{ color: 'var(--k-muted)' }}>
-                    Agent Review
+            <div id="klyr-diff-preview" className="mt-4">
+              <div className="klyr-fade-up flex items-center justify-between rounded-lg border px-4 py-3" style={{
+                borderColor: 'color-mix(in srgb, var(--k-accent) 40%, var(--k-input-border))',
+                background: 'color-mix(in srgb, var(--k-selection) 30%, var(--k-surface))',
+              }}>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{
+                    background: 'color-mix(in srgb, var(--k-accent) 20%, transparent)',
+                    color: 'var(--k-accent)'
+                  }}>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                   </div>
+                  <div>
+                    <div className="text-sm font-medium" style={{ color: 'var(--k-fg)' }}>
+                      {diffPreview.length} file{diffPreview.length === 1 ? '' : 's'} changed
+                    </div>
+                    <div className="text-xs" style={{ color: 'var(--k-muted)' }}>
+                      {plan?.summary || 'Review changes before applying'}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setChangesExpanded((current) => !current)}
-                    className="rounded-full border px-2.5 py-1 text-[11px] font-medium"
-                    style={{
-                      borderColor: 'var(--k-input-border)',
-                      background: 'color-mix(in srgb, var(--k-surface) 72%, transparent)',
-                      color: 'var(--k-muted)',
-                    }}
+                    className="klyr-inline-button"
                   >
-                    {changesExpanded ? 'Collapse' : 'Expand'}
+                    {changesExpanded ? 'Hide' : 'View'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRejectDraft}
+                    className="klyr-inline-button"
+                    style={{ borderColor: 'color-mix(in srgb, #f85149 40%, var(--k-input-border))' }}
+                  >
+                    Undo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onApplyDraft}
+                    className="klyr-action-button rounded-lg px-4 py-2 text-sm font-medium"
+                  >
+                    Apply
                   </button>
                 </div>
-                <div className="mt-1 text-[12px] leading-6" style={{ color: 'var(--k-muted)' }}>
-                  {diffPreview.length} file{diffPreview.length === 1 ? '' : 's'} prepared. Expand to inspect full added/removed lines.
-                </div>
-                {(plan || contextRefs.length > 0 || ghostSuggestion) ? (
-                  <div className="mt-2 text-[11px] leading-5" style={{ color: 'var(--k-muted)' }}>
-                    {[plan ? `Intent: ${plan.intent}` : null, contextRefs.length > 0 ? `Context: ${contextRefs.length} file${contextRefs.length === 1 ? '' : 's'}` : null, ghostSuggestion ? `Preview: ${ghostSuggestion.source}` : null]
-                      .filter(Boolean)
-                      .join(' | ')}
-                  </div>
-                ) : null}
               </div>
               {changesExpanded ? (
-                <DiffViewer
-                  changes={diffPreview}
-                  onApply={onApplyDraft}
-                  onReject={onRejectDraft}
-                  compact={layoutMode !== 'regular'}
-                />
+                <div className="klyr-fade-up mt-3">
+                  <DiffViewer
+                    changes={diffPreview}
+                    onApply={onApplyDraft}
+                    onReject={onRejectDraft}
+                    compact={layoutMode !== 'regular'}
+                  />
+                </div>
               ) : null}
             </div>
           ) : null}
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-5xl">
-        {pendingFiles.length > 0 ? (
-          <div
-            className={`mx-2 mb-2 rounded-2xl border ${narrow ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}
-            style={{
-              borderColor: 'var(--k-input-border)',
-              background: 'color-mix(in srgb, var(--k-input-bg) 62%, transparent)',
-            }}
-          >
-            <div className={`flex ${narrow ? 'flex-col gap-2' : 'items-center justify-between gap-3'}`}>
-              <div className="min-w-0">
-                <div className="text-[10px] font-medium uppercase tracking-[0.2em]" style={{ color: 'var(--k-muted)' }}>
-                  Pending edits
-                </div>
-                <div className="mt-1 text-xs font-medium" style={{ color: 'var(--k-fg)' }}>
-                  {pendingFiles.length} file{pendingFiles.length === 1 ? '' : 's'} changed
-                </div>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {pendingFiles.slice(0, 4).map((filePath) => (
-                    <span
-                      key={filePath}
-                      className="max-w-[11rem] truncate rounded-full border px-2 py-0.5 text-[11px]"
-                      style={{
-                        borderColor: 'var(--k-input-border)',
-                        color: 'var(--k-muted)',
-                        background: 'color-mix(in srgb, var(--k-surface) 70%, transparent)',
-                      }}
-                      title={filePath}
-                    >
-                      {filePath}
-                    </span>
-                  ))}
-                  {pendingFiles.length > 4 ? (
-                    <span className="rounded-full border px-2 py-0.5 text-[11px]" style={{ borderColor: 'var(--k-input-border)', color: 'var(--k-muted)' }}>
-                      +{pendingFiles.length - 4} more
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onApplyDraft}
-                  className="rounded-full border px-3 py-1.5 text-xs font-medium"
-                  style={{
-                    borderColor: 'color-mix(in srgb, var(--k-accent) 45%, transparent)',
-                    background: 'color-mix(in srgb, var(--k-selection) 58%, transparent)',
-                    color: 'var(--k-fg)',
-                  }}
-                >
-                  Keep
-                </button>
-                <button
-                  type="button"
-                  onClick={onRejectDraft}
-                  className="rounded-full border px-3 py-1.5 text-xs font-medium"
-                  style={{
-                    borderColor: 'var(--k-input-border)',
-                    background: 'color-mix(in srgb, var(--k-surface) 70%, transparent)',
-                    color: 'var(--k-muted)',
-                  }}
-                >
-                  Undo
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
+      <div className="mx-auto w-full max-w-5xl px-4 pb-4">
         <InputBox
           inputValue={inputValue}
           onInputChange={onInputChange}
@@ -528,25 +484,125 @@ function SettingsIcon() {
 
 function WelcomeLogo({ compact = false }: { compact?: boolean }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-label="Klyr logo"
-      className={compact ? 'h-16 w-16' : 'h-24 w-24'}
-      style={{
-        color: 'var(--k-fg)',
-        filter: 'drop-shadow(0 8px 26px color-mix(in srgb, var(--k-fg) 28%, transparent))',
-      }}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="12" cy="12" r="11" stroke="currentColor" strokeWidth="2" />
-      <path
-        d="M 8 7 L 8 17 M 16 7 L 8 13 L 16 17"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+    <div className="relative">
+      <div 
+        className="absolute inset-0 animate-klyr-glow rounded-full blur-xl"
+        style={{ background: 'color-mix(in srgb, var(--k-accent) 30%, transparent)' }}
       />
+      <svg
+        viewBox="0 0 24 24"
+        aria-label="Klyr logo"
+        className={`relative ${compact ? 'h-16 w-16' : 'h-24 w-24'}`}
+        style={{
+          color: 'var(--k-fg)',
+          filter: 'drop-shadow(0 8px 26px color-mix(in srgb, var(--k-fg) 28%, transparent))',
+        }}
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle 
+          cx="12" 
+          cy="12" 
+          r="11" 
+          stroke="currentColor" 
+          strokeWidth="2" 
+          className="animate-klyr-border-glow"
+        />
+        <path
+          d="M 8 7 L 8 17 M 16 7 L 8 13 L 16 17"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
+  );
+}
+
+interface QuickActionProps {
+  label: string;
+  icon: React.ReactNode;
+}
+
+function QuickAction({ label, icon }: QuickActionProps) {
+  return (
+    <button
+      type="button"
+      className="klyr-fade-up klyr-hover-lift flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-all"
+      style={{
+        borderColor: 'var(--k-input-border)',
+        background: 'color-mix(in srgb, var(--k-surface) 50%, transparent)',
+        color: 'var(--k-fg)',
+        animationDelay: `${Math.random() * 0.3}s`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'var(--k-accent)';
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--k-selection) 40%, var(--k-surface))';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'var(--k-input-border)';
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--k-surface) 50%, transparent)';
+      }}
+    >
+      <span className="flex h-4 w-4 items-center justify-center" style={{ color: 'var(--k-accent)' }}>
+        {icon}
+      </span>
+      <span className="font-medium">{label}</span>
+    </button>
+  );
+}
+
+function ExplainIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M6 4.5h9.5L19.5 8v11A1.5 1.5 0 0 1 18 20.5H6A1.5 1.5 0 0 1 4.5 19V6A1.5 1.5 0 0 1 6 4.5Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15.5 4.5V8h4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 12h8M8 15h5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BugIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 7.5a3 3 0 0 1 3 3V16a3 3 0 0 1-6 0v-5.5a3 3 0 0 1 3-3Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.2 7 12 5.2 13.8 7M7.5 10.5h9M7.5 14h9M6 8.8 8 10M18 8.8 16 10M6 15.7 8 14.5M18 15.7 16 14.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M4.5 12.5 9.5 17.5 19.5 7.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function RefactorIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M7 7h7a3 3 0 1 1 0 6H8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10.5 15H17a3 3 0 1 1 0 6H10" strokeLinecap="round" strokeLinejoin="round" transform="translate(0 -4)" />
+      <path d="M8 10 5 13l3 3M16 8l3-3-3-3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function BoltIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M13.2 3.5 6.5 12h4.7L10.8 20.5 17.5 12h-4.7l.4-8.5Z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DocumentIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M7 3.5h8L19.5 8v12A1.5 1.5 0 0 1 18 21.5H7A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15 3.5V8h4.5M8.5 12h7M8.5 15h7M8.5 18h5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

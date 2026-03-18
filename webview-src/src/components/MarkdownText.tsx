@@ -16,7 +16,7 @@ function MarkdownText({ compact = false, content, showCursor = false }: Markdown
   const blocks = parseMarkdownBlocks(normalizeMarkdown(content));
 
   return (
-    <div className={compact ? 'space-y-2.5' : 'space-y-3'}>
+    <div className={compact ? 'space-y-2' : 'space-y-2.5'}>
       {blocks.map((block, index) => renderBlock(block, compact, showCursor && index === blocks.length - 1, `block-${index}`))}
     </div>
   );
@@ -48,7 +48,7 @@ function renderBlock(
       return (
         <ul
           key={key}
-          className={`space-y-1.5 pl-5 ${compact ? 'text-[13px] leading-6' : 'text-sm leading-7'}`}
+          className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
           style={{ color: 'var(--k-fg)' }}
         >
           {block.items.map((item, index) => (
@@ -64,7 +64,7 @@ function renderBlock(
       return (
         <ol
           key={key}
-          className={`space-y-1.5 pl-5 ${compact ? 'text-[13px] leading-6' : 'text-sm leading-7'}`}
+          className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
           style={{ color: 'var(--k-fg)' }}
         >
           {block.items.map((item, index) => (
@@ -81,7 +81,7 @@ function renderBlock(
       return (
         <p
           key={key}
-          className={`whitespace-pre-wrap break-words ${compact ? 'text-[13px] leading-6' : 'leading-7'}`}
+          className={`whitespace-pre-wrap break-words ${compact ? 'text-[13px] leading-[1.52]' : 'text-[14px] leading-[1.58]'}`}
         >
           {renderInlineMarkdown(block.content, `${key}-paragraph`, showCursor)}
         </p>
@@ -112,9 +112,10 @@ function renderInlineMarkdown(
       nodes.push(
         <code
           key={tokenKey}
-          className="rounded-md px-1.5 py-0.5 font-mono text-[0.92em]"
+          className="rounded-md border px-1.5 py-0.5 font-mono text-[0.88em]"
           style={{
-            background: 'color-mix(in srgb, var(--k-input-bg) 70%, transparent)',
+            borderColor: 'color-mix(in srgb, var(--k-input-border) 75%, transparent)',
+            background: 'color-mix(in srgb, var(--k-surface) 86%, transparent)',
             color: 'var(--k-input-fg)',
           }}
         >
@@ -179,7 +180,7 @@ function parseMarkdownBlocks(content: string): MarkdownBlock[] {
       continue;
     }
 
-    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    const headingMatch = line.match(/^\s*(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       flushParagraph();
       blocks.push({
@@ -243,13 +244,13 @@ function collectList(
 function getHeadingClass(level: number, compact: boolean): string {
   switch (level) {
     case 1:
-      return compact ? 'text-[16px] font-semibold tracking-tight' : 'text-lg font-semibold tracking-tight';
+      return compact ? 'text-[15px] font-semibold tracking-tight leading-[1.3]' : 'text-[18px] font-semibold tracking-tight leading-[1.3]';
     case 2:
-      return compact ? 'text-[15px] font-semibold tracking-tight' : 'text-base font-semibold tracking-tight';
+      return compact ? 'text-[14px] font-semibold tracking-tight leading-[1.3]' : 'text-[16px] font-semibold tracking-tight leading-[1.32]';
     case 3:
-      return compact ? 'text-[14px] font-semibold tracking-tight' : 'text-[15px] font-semibold tracking-tight';
+      return compact ? 'text-[13px] font-semibold tracking-tight leading-[1.35]' : 'text-[15px] font-semibold tracking-tight leading-[1.35]';
     default:
-      return compact ? 'text-[13px] font-semibold uppercase tracking-[0.16em]' : 'text-sm font-semibold uppercase tracking-[0.16em]';
+      return compact ? 'text-[12px] font-semibold uppercase tracking-[0.14em]' : 'text-[13px] font-semibold uppercase tracking-[0.14em]';
   }
 }
 

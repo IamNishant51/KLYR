@@ -3,7 +3,7 @@ import type { Coder, CoderAnswer, CoderContext, CoderInput, CodeDraft } from '..
 import * as path from 'path';
 import { runFixerLoop } from '../agent/fixer';
 import type { DiffPreview, Executor } from '../agent/executor';
-import type { ValidationResult, Validator } from '../agent/validator';
+import type { ValidationError, ValidationResult, Validator } from '../agent/validator';
 import type { ContextDocument, ContextEngine } from '../context/contextEngine';
 import { formatMemoryForContext, type MemoryStore } from '../context/memory';
 import { summarizeContext, uniqueDocumentsByPath } from '../context/retriever';
@@ -230,6 +230,28 @@ export class Pipeline {
         };
       }
 
+      const operationGuardErrors = this.detectUnexpectedOperations(
+        fixerResult.draft,
+        plan.intent,
+        context.prompt
+      );
+      if (operationGuardErrors.length > 0) {
+        return {
+          ok: false,
+          mode: plan.mode,
+          draft: fixerResult.draft,
+          plan,
+          validation: {
+            ok: false,
+            errors: operationGuardErrors,
+          },
+          error: operationGuardErrors.map((error) => error.message).join('\n'),
+          retrievedDocuments: finalDocuments,
+          contextSummary,
+          logs: this.logs,
+        };
+      }
+
       await this.emitStage(
         callbacks,
         'validating',
@@ -372,5 +394,36 @@ export class Pipeline {
   private log(message: string): void {
     this.logs.push(message);
     this.logger.debug(message);
+  }
+
+  private detectUnexpectedOperations(
+    draft: CodeDraft,
+    intent: string,
+    prompt: string
+  ): ValidationError[] {
+    const lowerPrompt = prompt.toLowerCase();
+    const errors: ValidationError[] = [];
+    const hasCreateIntent = /\b(create|add new|generate new|new file)\b/.test(lowerPrompt);
+    const hasDeleteIntent = /\b(delete|remove|drop)\b/.test(lowerPrompt);
+
+    for (const change of draft.changes) {
+      if (change.operation === 'create' && !hasCreateIntent && intent !== 'create') {
+        errors.push({
+          code: 'UNEXPECTED_CREATE',
+          message: `Unexpected file creation detected for ${change.path}. Prompt did not explicitly request creating files.`,
+          file: change.path,
+        });
+      }
+
+      if (change.operation === 'delete' && !hasDeleteIntent && intent !== 'delete') {
+        errors.push({
+          code: 'UNEXPECTED_DELETE',
+          message: `Unexpected file deletion detected for ${change.path}. Prompt did not explicitly request deletions.`,
+          file: change.path,
+        });
+      }
+    }
+
+    return errors;
   }
 }

@@ -89,6 +89,24 @@ export class BasicValidator implements Validator {
       return errors;
     }
 
+    if (change.operation === 'update' && !existsOnDisk) {
+      errors.push({
+        code: 'UPDATE_TARGET_NOT_FOUND',
+        message: `Cannot update non-existent file: ${relativePath}. Use create operation for new files.`,
+        file: change.path,
+      });
+      return errors;
+    }
+
+    if (change.operation === 'create' && existsOnDisk) {
+      errors.push({
+        code: 'CREATE_TARGET_EXISTS',
+        message: `Cannot create file that already exists: ${relativePath}. Use update operation instead.`,
+        file: change.path,
+      });
+      return errors;
+    }
+
     if (!existsOnDisk && !allowNewFiles) {
       errors.push({
         code: 'NEW_FILE_NOT_ALLOWED',
@@ -393,6 +411,23 @@ export class BasicValidator implements Validator {
         message: 'child_process usage is blocked in deterministic mode.',
       },
     ];
+
+    const normalizedPath = filePath.toLowerCase();
+    const isMarkdownOrText = /\.(md|txt|rst|adoc)$/i.test(normalizedPath);
+    if (!isMarkdownOrText) {
+      patterns.push(
+        {
+          code: 'HALLUCINATED_PLACEHOLDER',
+          pattern: /\b(your_api_key|your_token|replace_with|insert_here|placeholder_value)\b/i,
+          message: 'Draft contains placeholder values that indicate ungrounded generation.',
+        },
+        {
+          code: 'MARKDOWN_LEAKAGE',
+          pattern: /```[a-zA-Z]*\n[\s\S]*```/,
+          message: 'Draft appears to contain markdown code fences instead of raw file content.',
+        }
+      );
+    }
 
     return patterns
       .filter((entry) => entry.pattern.test(content))
