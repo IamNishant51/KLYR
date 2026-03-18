@@ -1,0 +1,286 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --k-bg: var(--vscode-editor-background, #1e1e1e);
+    --k-fg: var(--vscode-editor-foreground, #d4d4d4);
+    --k-muted: var(--vscode-descriptionForeground, #9da0a6);
+    --k-border: var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
+    --k-surface: var(--vscode-editorWidget-background, #252526);
+    --k-surface-2: var(--vscode-sideBar-background, #252526);
+    --k-input-bg: var(--vscode-input-background, #3c3c3c);
+    --k-input-fg: var(--vscode-input-foreground, #cccccc);
+    --k-input-border: var(--vscode-input-border, rgba(127, 127, 127, 0.35));
+    --k-accent: var(--vscode-focusBorder, #007fd4);
+    --k-button-bg: var(--vscode-button-background, #0e639c);
+    --k-button-fg: var(--vscode-button-foreground, #ffffff);
+    --k-button-hover: var(--vscode-button-hoverBackground, #1177bb);
+    --k-selection: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
+  }
+
+  html {
+    background: var(--k-bg);
+    color: var(--k-fg);
+  }
+
+  body,
+  #root {
+    @apply min-h-screen;
+  }
+
+  body {
+    font-family: "Segoe UI", "SF Pro Text", "Inter", ui-sans-serif, system-ui, sans-serif;
+    background: var(--k-bg);
+  }
+}
+
+@layer components {
+  .klyr-shell {
+    @apply flex h-screen w-full flex-col overflow-hidden;
+    color: var(--k-fg);
+    background:
+      radial-gradient(circle at 8% -12%, color-mix(in srgb, var(--k-accent) 14%, transparent), transparent 38%),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--k-bg) 90%, var(--k-surface) 10%) 0%,
+        var(--k-bg) 100%
+      );
+  }
+
+  .klyr-fade-up {
+    animation: klyr-fade-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: opacity, transform;
+  }
+
+  .klyr-scrollbar {
+    scrollbar-color: rgba(148, 163, 184, 0.22) transparent;
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.18);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.3);
+    background-clip: padding-box;
+  }
+
+  .klyr-action-button {
+    background: var(--k-button-bg);
+    color: var(--k-button-fg);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--k-button-bg) 28%, transparent);
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      filter 0.16s ease;
+    will-change: transform;
+  }
+
+  .klyr-action-button:hover {
+    background: var(--k-button-hover);
+    box-shadow: 0 14px 30px color-mix(in srgb, var(--k-button-bg) 36%, transparent);
+    transform: scale(1.03);
+  }
+
+  .klyr-action-button:active {
+    transform: scale(0.97);
+  }
+
+  .klyr-secondary-button {
+    border: 1px solid var(--k-input-border);
+    background: color-mix(in srgb, var(--k-input-bg) 70%, transparent);
+    color: var(--k-input-fg);
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      color 0.16s ease;
+    will-change: transform;
+  }
+
+  .klyr-secondary-button:hover {
+    border-color: var(--k-accent);
+    background: color-mix(in srgb, var(--k-selection) 60%, transparent);
+    box-shadow: 0 10px 22px color-mix(in srgb, var(--k-accent) 22%, transparent);
+    transform: scale(1.03);
+  }
+
+  .klyr-secondary-button:active {
+    transform: scale(0.97);
+  }
+
+  .klyr-inline-button {
+    @apply rounded-full px-3 py-1.5 text-[11px] font-medium;
+    color: var(--k-input-fg);
+    border: 1px solid var(--k-input-border);
+    background: color-mix(in srgb, var(--k-input-bg) 68%, transparent);
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      color 0.16s ease;
+    will-change: transform;
+  }
+
+  .klyr-inline-button:hover {
+    border-color: var(--k-accent);
+    background: color-mix(in srgb, var(--k-selection) 58%, transparent);
+    color: var(--k-fg);
+    transform: scale(1.03);
+  }
+
+  .klyr-inline-button:active {
+    transform: scale(0.97);
+  }
+
+  .klyr-icon-button {
+    @apply flex h-10 w-10 items-center justify-center rounded-full;
+    color: var(--k-muted);
+    border: 1px solid var(--k-input-border);
+    background: color-mix(in srgb, var(--k-input-bg) 62%, transparent);
+    transition:
+      transform 0.16s ease,
+      box-shadow 0.16s ease,
+      background-color 0.16s ease,
+      border-color 0.16s ease,
+      color 0.16s ease;
+    will-change: transform;
+  }
+
+  .klyr-icon-button:hover {
+    border-color: var(--k-accent);
+    background: color-mix(in srgb, var(--k-selection) 56%, transparent);
+    color: var(--k-fg);
+    box-shadow: 0 10px 22px color-mix(in srgb, var(--k-accent) 24%, transparent);
+    transform: scale(1.03);
+  }
+
+  .klyr-icon-button:active {
+    transform: scale(0.97);
+  }
+
+  .klyr-cursor {
+    @apply inline-block h-4 w-[7px] rounded-full;
+    background: var(--vscode-editorCursor-foreground, #aeafad);
+    animation: klyr-caret 1s steps(2, start) infinite;
+  }
+
+  .klyr-virtual-row {
+    content-visibility: auto;
+  }
+
+  .klyr-welcome-card {
+    border: 1px solid color-mix(in srgb, var(--k-border) 80%, transparent);
+    background:
+      radial-gradient(circle at 8% 8%, color-mix(in srgb, var(--k-accent) 12%, transparent), transparent 48%),
+      color-mix(in srgb, var(--k-surface) 85%, transparent);
+    box-shadow: 0 26px 60px color-mix(in srgb, var(--k-bg) 66%, transparent);
+    animation: klyr-fade-up 0.42s cubic-bezier(0.2, 0.8, 0.2, 1), klyr-welcome-glow 5.8s ease-in-out infinite;
+  }
+
+  .klyr-welcome-badge {
+    border: 1px solid color-mix(in srgb, var(--k-accent) 40%, transparent);
+    color: color-mix(in srgb, var(--k-fg) 92%, var(--k-accent) 8%);
+    background: color-mix(in srgb, var(--k-selection) 58%, transparent);
+  }
+
+  .klyr-welcome-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .klyr-welcome-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-120%);
+    background: linear-gradient(
+      110deg,
+      transparent 0%,
+      color-mix(in srgb, var(--k-accent) 22%, transparent) 45%,
+      transparent 70%
+    );
+    animation: klyr-shimmer 2.8s ease-in-out infinite;
+    pointer-events: none;
+  }
+}
+
+@keyframes klyr-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes klyr-welcome-glow {
+  0%,
+  100% {
+    box-shadow: 0 20px 48px color-mix(in srgb, var(--k-bg) 64%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 24px 56px color-mix(in srgb, var(--k-bg) 54%, transparent),
+      0 0 0 1px color-mix(in srgb, var(--k-accent) 22%, transparent) inset;
+  }
+}
+
+@keyframes klyr-shimmer {
+  0%,
+  16% {
+    transform: translateX(-120%);
+  }
+  48%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes klyr-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes klyr-caret {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .animate-klyr-pulse {
+    animation: klyr-pulse 1.5s ease-in-out infinite;
+  }
+}

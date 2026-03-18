@@ -1,0 +1,68 @@
+// See https://go.microsoft.com/fwlink/?LinkId=733558
+// for the documentation about the tasks.json format
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "npm: watch",
+			"type": "npm",
+			"script": "watch",
+			"problemMatcher": {
+				"pattern": {
+					"regexp": "^(.+):(\\d+):(\\d+):\\s+(error|warning)\\s+(.*)$",
+					"file": 1,
+					"location": "2:3",
+					"message": 5,
+					"severity": 4
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": "^.*webpack.*",
+					"endsPattern": "^.*webpack.*compiled.*"
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "always",
+				"group": "watchers"
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		},
+		{
+			"label": "npm: watch-tests",
+			"type": "npm",
+			"script": "watch-tests",
+			"problemMatcher": {
+				"pattern": {
+					"regexp": "^src/(.+)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s+(.*)$",
+					"file": 1,
+					"location": "2:3",
+					"message": 5,
+					"severity": 4
+				},
+				"background": {
+					"activeOnStart": true,
+					"beginsPattern": "^.*watch.*",
+					"endsPattern": "^.*watch.*complete.*"
+				}
+			},
+			"isBackground": true,
+			"presentation": {
+				"reveal": "never",
+				"group": "watchers"
+			},
+			"group": "build"
+		},
+		{
+			"label": "tasks: watch-tests",
+			"dependsOn": [
+				"npm: watch",
+				"npm: watch-tests"
+			],
+			"problemMatcher": []
+		}
+	]
+}

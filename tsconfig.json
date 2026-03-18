@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"module": "Node16",
+		"target": "ES2022",
+		"lib": [
+			"ES2022"
+		],
+		"sourceMap": true,
+		"rootDir": "src",
+		"strict": true,
+		"jsx": "react-jsx",
+		"composite": true,
+		"skipLibCheck": true
+	},
+	"exclude": ["node_modules", "webview-src", "dist", "vite.config.*.ts", "webpack.config.js"]
+}

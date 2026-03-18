@@ -1,0 +1,174 @@
+{
+  "name": "klyr",
+  "displayName": "klyr",
+  "description": "Klyr is a next-generation AI coding assistant for VS Code powered by local LLMs. It delivers fast, context-aware code generation, intelligent refactoring, and precise debugging without relying on external APIs. Built with a deterministic agent pipeline, Klyr reads your entire workspace, plans tasks step-by-step, validates outputs using AST-based checks, and applies safe, previewable changes to eliminate hallucinations.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.110.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "klyr.openChat",
+        "title": "Klyr: Open Chat"
+      },
+      {
+        "command": "klyr.fixCurrentFile",
+        "title": "Klyr: Fix Current File"
+      },
+      {
+        "command": "klyr.refactorCurrentFile",
+        "title": "Klyr: Refactor Current File"
+      },
+      {
+        "command": "klyr.optimizeCurrentFile",
+        "title": "Klyr: Optimize Current File"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "klyr-sidebar",
+          "title": "Klyr",
+          "icon": "media/klyr-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "klyr-sidebar": [
+        {
+          "id": "klyr.chatView",
+          "name": "Chat",
+          "type": "webview",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Klyr",
+      "properties": {
+        "klyr.ollama.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL for the local Ollama server."
+        },
+        "klyr.ollama.model": {
+          "type": "string",
+          "default": "qwen2.5-coder",
+          "description": "Ollama model name to use for code generation."
+        },
+        "klyr.ollama.temperature": {
+          "type": "number",
+          "default": 0,
+          "description": "Sampling temperature. Use 0 for deterministic output."
+        },
+        "klyr.ollama.timeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "description": "Request timeout in milliseconds."
+        },
+        "klyr.ollama.maxRetries": {
+          "type": "number",
+          "default": 2,
+          "description": "Number of retry attempts for Ollama requests."
+        },
+        "klyr.ollama.retryBackoffMs": {
+          "type": "number",
+          "default": 800,
+          "description": "Backoff between retries in milliseconds."
+        },
+        "klyr.context.maxFiles": {
+          "type": "number",
+          "default": 120,
+          "description": "Maximum number of workspace files to index per request."
+        },
+        "klyr.context.maxFileSize": {
+          "type": "number",
+          "default": 204800,
+          "description": "Maximum file size in bytes for indexed text files."
+        },
+        "klyr.context.maxTotalSize": {
+          "type": "number",
+          "default": 512000,
+          "description": "Maximum total indexed text size per request."
+        },
+        "klyr.context.retrievalMaxResults": {
+          "type": "number",
+          "default": 8,
+          "description": "Maximum number of retrieved context chunks to send to the model."
+        },
+        "klyr.context.retrievalMinScore": {
+          "type": "number",
+          "default": 0,
+          "description": "Minimum retrieval score kept after ranking."
+        },
+        "klyr.execution.maxAttempts": {
+          "type": "number",
+          "default": 2,
+          "description": "Maximum fixer-loop attempts before failing."
+        },
+        "klyr.execution.noOp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserved no-op execution flag for future dry-run modes."
+        },
+        "klyr.inline.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline ghost-text completions from the local model."
+        },
+        "klyr.inline.maxPrefixChars": {
+          "type": "number",
+          "default": 2500,
+          "description": "Maximum prefix characters sent for inline completions."
+        },
+        "klyr.inline.maxSuffixChars": {
+          "type": "number",
+          "default": 1200,
+          "description": "Maximum suffix characters sent for inline completions."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "build:webview": "vite build --config vite.config.webview.ts",
+    "compile": "npm run build:webview && webpack",
+    "watch": "concurrently \"npm run watch:webview\" \"npm run watch:webpack\"",
+    "watch:webview": "vite build --config vite.config.webview.ts --watch",
+    "watch:webpack": "webpack --watch",
+    "package": "npm run build:webview && webpack --mode production --devtool hidden-source-map",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.110.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "typescript-eslint": "^8.56.1",
+    "eslint": "^9.39.3",
+    "typescript": "^5.9.3",
+    "ts-loader": "^9.5.4",
+    "webpack": "^5.105.3",
+    "webpack-cli": "^6.0.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "concurrently": "^8.2.2"
+  }
+}
