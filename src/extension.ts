@@ -55,6 +55,37 @@ interface ChatHistoryEntry {
   messages: UiChatMessage[];
 }
 
+// Track recently modified lines for visual diff decorations
+interface FileChangeInfo {
+  addedLines: number[];
+  removedLines: number[];
+  timestamp: number;
+}
+
+interface StagedEdit {
+  path: string;
+  uri: vscode.Uri;
+  originalContent: string;
+  proposedContent: string;
+}
+
+const fileChangeDecorations = new Map<string, FileChangeInfo>();
+
+// Create decoration types for added and removed lines
+const addedLineDecoration = vscode.window.createTextEditorDecorationType({
+  backgroundColor: 'rgba(76, 175, 80, 0.2)', // Light green
+  light: { backgroundColor: 'rgba(76, 175, 80, 0.15)' },
+  dark: { backgroundColor: 'rgba(76, 175, 80, 0.25)' },
+  isWholeLine: true,
+});
+
+const removedLineDecoration = vscode.window.createTextEditorDecorationType({
+  backgroundColor: 'rgba(244, 67, 54, 0.2)', // Light red
+  light: { backgroundColor: 'rgba(244, 67, 54, 0.15)' },
+  dark: { backgroundColor: 'rgba(244, 67, 54, 0.25)' },
+  isWholeLine: true,
+});
+
 /**
  * WebviewViewProvider for the Klyr sidebar chat view
  */
@@ -306,6 +337,166 @@ class KlyrLauncherViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
+// Helper function to normalize paths for consistent comparison
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').toLowerCase();
+}
+
+// Helper function to apply decorations to an editor
+function applyDecorationsForEditor(editor: vscode.TextEditor): void {
+  const fsPath = normalizePath(editor.document.uri.fsPath);
+  
+  // Try all keys in the map to find a match
+  let changeInfo: FileChangeInfo | undefined;
+  for (const [storedPath, info] of fileChangeDecorations.entries()) {
+    if (normalizePath(storedPath) === fsPath) {
+      changeInfo = info;
+      break;
+    }
+  }
+
+  if (!changeInfo) {
+    // Clear any existing decorations if no change info
+    editor.setDecorations(addedLineDecoration, []);
+    editor.setDecorations(removedLineDecoration, []);
+    return;
+  }
+
+  console.log(`[Klyr] Applying decorations to ${editor.document.fileName}`);
+  console.log(`[Klyr] Added lines: ${changeInfo.addedLines.join(', ')}`);
+  console.log(`[Klyr] Removed lines: ${changeInfo.removedLines.join(', ')}`);
+
+  // Create decoration ranges for added and removed lines
+  const addedRanges = changeInfo.addedLines.map(
+    (lineNum) => new vscode.Range(lineNum, 0, lineNum, Number.MAX_SAFE_INTEGER)
+  );
+  const removedRanges = changeInfo.removedLines.map(
+    (lineNum) => new vscode.Range(lineNum, 0, lineNum, Number.MAX_SAFE_INTEGER)
+  );
+
+  editor.setDecorations(addedLineDecoration, addedRanges);
+  editor.setDecorations(removedLineDecoration, removedRanges);
+}
+
+// Helper function to clear decorations for a file
+function clearDecorationsForUri(fsPath: string): void {
+  const normalized = normalizePath(fsPath);
+  
+  // Remove all keys that match
+  for (const key of fileChangeDecorations.keys()) {
+    if (normalizePath(key) === normalized) {
+      fileChangeDecorations.delete(key);
+    }
+  }
+  
+  // Clear decorations from all visible editors showing this file
+  for (const editor of vscode.window.visibleTextEditors) {
+    if (normalizePath(editor.document.uri.fsPath) === normalized) {
+      editor.setDecorations(addedLineDecoration, []);
+      editor.setDecorations(removedLineDecoration, []);
+    }
+  }
+}
+
+function clearAllDecorations(): void {
+  fileChangeDecorations.clear();
+  for (const editor of vscode.window.visibleTextEditors) {
+    editor.setDecorations(addedLineDecoration, []);
+    editor.setDecorations(removedLineDecoration, []);
+  }
+}
+
+// Helper function to calculate line ranges from content changes
+function calculateLineRanges(
+  beforeContent: string,
+  afterContent: string
+): { addedLines: number[]; removedLines: number[] } {
+  const beforeLines = beforeContent.split('\n');
+  const afterLines = afterContent.split('\n');
+  
+  const addedLines: Set<number> = new Set();
+  const removedLines: Set<number> = new Set();
+  
+  // Use a simple diff algorithm to find changed lines
+  let beforeIdx = 0;
+  let afterIdx = 0;
+  
+  while (beforeIdx < beforeLines.length || afterIdx < afterLines.length) {
+    // Get current lines (or empty string if beyond array bounds)
+    const beforeLine = beforeIdx < beforeLines.length ? beforeLines[beforeIdx] : null;
+    const afterLine = afterIdx < afterLines.length ? afterLines[afterIdx] : null;
+    
+    // If lines match, move both pointers forward
+    if (beforeLine !== null && afterLine !== null && beforeLine === afterLine) {
+      beforeIdx++;
+      afterIdx++;
+    }
+    // If before is null, remaining after lines are added
+    else if (beforeLine === null) {
+      addedLines.add(afterIdx);
+      afterIdx++;
+    }
+    // If after is null, remaining before lines are removed
+    else if (afterLine === null) {
+      removedLines.add(beforeIdx);
+      beforeIdx++;
+    }
+    // Lines differ - check if it's a modification or different sections
+    else {
+      // Look ahead to find matching lines
+      let beforeMatch = -1;
+      let afterMatch = -1;
+      
+      // Find where before line appears in after
+      for (let i = afterIdx + 1; i < Math.min(afterIdx + 5, afterLines.length); i++) {
+        if (afterLines[i] === beforeLine) {
+          afterMatch = i;
+          break;
+        }
+      }
+      
+      // Find where after line appears in before
+      for (let i = beforeIdx + 1; i < Math.min(beforeIdx + 5, beforeLines.length); i++) {
+        if (beforeLines[i] === afterLine) {
+          beforeMatch = i;
+          break;
+        }
+      }
+      
+      // If we found matches, mark intermediate lines as added/removed
+      if (afterMatch !== -1 && beforeMatch === -1) {
+        // Lines were inserted in after
+        for (let i = afterIdx; i < afterMatch; i++) {
+          addedLines.add(i);
+        }
+        beforeIdx++;
+        afterIdx = afterMatch;
+      } else if (beforeMatch !== -1 && afterMatch === -1) {
+        // Lines were removed from before
+        for (let i = beforeIdx; i < beforeMatch; i++) {
+          removedLines.add(i);
+        }
+        beforeIdx = beforeMatch;
+        afterIdx++;
+      } else {
+        // Just mark as modified
+        addedLines.add(afterIdx);
+        beforeIdx++;
+        afterIdx++;
+      }
+    }
+  }
+  
+  console.log(`[Klyr] calculateLineRanges: before=${beforeLines.length} lines, after=${afterLines.length} lines`);
+  console.log(`[Klyr] Added: ${Array.from(addedLines).join(', ') || 'none'}`);
+  console.log(`[Klyr] Removed: ${Array.from(removedLines).join(', ') || 'none'}`);
+  
+  return { 
+    addedLines: Array.from(addedLines), 
+    removedLines: Array.from(removedLines) 
+  };
+}
+
 export function activate(context: vscode.ExtensionContext) {
   try {
     const controller = new KlyrExtensionController(context);
@@ -361,6 +552,15 @@ export function activate(context: vscode.ExtensionContext) {
       fileWatcher.onDidDelete(() => controller.invalidateIndexCache())
     );
 
+    // Register listeners for diff decorations
+    context.subscriptions.push(
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor) {
+          applyDecorationsForEditor(editor);
+        }
+      })
+    );
+
     logger.debug('Klyr extension activated successfully');
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -383,6 +583,7 @@ class KlyrExtensionController {
   private readonly state: WebviewState;
   private chatView?: vscode.WebviewView;
   private pendingPreview?: DiffPreview;
+  private stagedEdits = new Map<string, StagedEdit>();
   private lastPrompt?: string;
   private lastPlan?: PlanResult;
   private selectedModelOverride?: string;
@@ -393,6 +594,10 @@ class KlyrExtensionController {
   private lastUiUpdate = 0;
   private readonly UI_UPDATE_THROTTLE_MS = 50;
   private pendingUiSyncTimer: ReturnType<typeof setTimeout> | undefined;
+
+  private normalizeRelativePathForKey(relativePath: string): string {
+    return relativePath.replace(/\\/g, '/').toLowerCase();
+  }
 
   constructor(extensionContext: vscode.ExtensionContext) {
     this.extensionContext = extensionContext;
@@ -762,6 +967,7 @@ class KlyrExtensionController {
 
   private async stopActiveRequest(): Promise<void> {
     this.requestSerial += 1;
+    await this.discardStagedEdits();
     this.pendingPreview = undefined;
     this.state.diffPreview = [];
     this.setStatus('idle', 'Stopped.');
@@ -941,17 +1147,26 @@ class KlyrExtensionController {
       this.state.totalAdditions = result.preview.totalAdditions;
       this.state.totalDeletions = result.preview.totalDeletions;
 
+      const staged = await this.stagePreviewEdits(result.preview, runtime.workspaceRoot);
+
       const planSummary = result.plan ? `Plan: ${result.plan.summary}` : 'Plan ready.';
       const rationale = result.preview.rationale || result.preview.summary;
       const changesSummary = `Files: ${result.preview.changes.length} change(s) | +${result.preview.totalAdditions} -${result.preview.totalDeletions}`;
       
       this.appendMessage(
         'assistant',
-        `${planSummary}\n\nReasoning: ${rationale}\n\n${changesSummary}\n\nReview the diff preview in the sidebar. Click "Apply Changes" to accept or "Reject Changes" to cancel.`
+        `${planSummary}\n\nReasoning: ${rationale}\n\n${changesSummary}\n\nPrepared ${staged.stagedCount} file edit(s) in the editor. Review changes, then click Keep to accept or Undo to reject.`
       );
+
+      if (staged.errors.length > 0) {
+        this.appendMessage(
+          'assistant',
+          `Some files could not be staged in-editor and will be finalized on Keep: ${staged.errors.join(', ')}`
+        );
+      }
       
       // ALWAYS show diff for review - never auto-apply
-      this.setStatus('review', 'Review changes in sidebar, then apply or reject.');
+      this.setStatus('review', 'Review staged changes, then Keep or Undo.');
       await this.persistState();
       this.syncWebview();
       return;
@@ -1030,8 +1245,6 @@ class KlyrExtensionController {
 
   private async handleDiffDecision(decision: 'accept' | 'reject'): Promise<void> {
     let preview = this.pendingPreview;
-    this.pendingPreview = undefined;
-    this.state.diffPreview = [];
 
     if (!preview) {
       this.setStatus('idle');
@@ -1040,7 +1253,12 @@ class KlyrExtensionController {
     }
 
     if (decision === 'reject') {
-      this.appendMessage('assistant', 'Diff rejected. No files were modified.');
+      await this.discardStagedEdits();
+      this.pendingPreview = undefined;
+      this.state.diffPreview = [];
+      this.state.totalAdditions = 0;
+      this.state.totalDeletions = 0;
+      this.appendMessage('assistant', 'Draft rejected. Staged file edits were reverted.');
       const rejectWorkspaceRoot = getWorkspaceRoot();
       if (rejectWorkspaceRoot) {
         await this.cleanupBackups(rejectWorkspaceRoot);
@@ -1097,9 +1315,13 @@ class KlyrExtensionController {
     this.setStatus('executing', 'Applying validated changes to the workspace.');
     this.syncWebview();
 
+    const stagedAcceptResult = await this.acceptStagedEdits();
+
     const backupPaths: string[] = [];
     for (const change of preview.changes) {
-      if (change.operation !== 'update') {
+      const isStagedUpdate =
+        change.operation === 'update' && this.stagedEdits.has(this.normalizeRelativePathForKey(change.path));
+      if (change.operation !== 'update' || isStagedUpdate) {
         continue;
       }
       const filePath = path.join(workspaceRoot, change.path);
@@ -1110,14 +1332,17 @@ class KlyrExtensionController {
     }
 
     const applyResult: ApplyResult = {
-      applied: 0,
+      applied: stagedAcceptResult.applied,
       rejected: 0,
-      changedPaths: [],
-      errors: [],
+      changedPaths: [...stagedAcceptResult.changedPaths],
+      errors: [...stagedAcceptResult.errors],
     };
 
     for (let index = 0; index < preview.changes.length; index += 1) {
       const change = preview.changes[index];
+      if (change.operation === 'update' && this.stagedEdits.has(this.normalizeRelativePathForKey(change.path))) {
+        continue;
+      }
       this.setStatus(
         'executing',
         `Applying ${change.operation}: ${change.path} (${index + 1}/${preview.changes.length})`
@@ -1129,9 +1354,37 @@ class KlyrExtensionController {
       applyResult.rejected += singleResult.rejected;
       applyResult.changedPaths.push(...singleResult.changedPaths);
       applyResult.errors.push(...singleResult.errors);
+
+      // Track file changes for visual diff decorations
+      if (singleResult.applied > 0 && change.operation === 'update' && change.originalContent) {
+        const filePath = path.join(workspaceRoot, change.path);
+        const { addedLines, removedLines } = calculateLineRanges(
+          change.originalContent,
+          change.proposedContent
+        );
+        console.log(`[Klyr] Storing decorations for: ${filePath}`);
+        console.log(`[Klyr] Added lines: [${addedLines.join(', ')}], Removed lines: [${removedLines.join(', ')}]`);
+        fileChangeDecorations.set(filePath, {
+          addedLines,
+          removedLines,
+          timestamp: Date.now(),
+        });
+      }
     }
 
     this.invalidateIndexCache();
+    for (const staged of this.stagedEdits.values()) {
+      clearDecorationsForUri(staged.uri.fsPath);
+    }
+    for (const changedPath of stagedAcceptResult.changedPaths) {
+      clearDecorationsForUri(path.join(workspaceRoot, changedPath));
+    }
+    clearAllDecorations();
+    this.stagedEdits.clear();
+    this.pendingPreview = undefined;
+    this.state.diffPreview = [];
+    this.state.totalAdditions = 0;
+    this.state.totalDeletions = 0;
 
     if (applyResult.errors.length > 0) {
       const details = applyResult.errors.map((error) => `${error.path}: ${error.message}`).join('\n');
@@ -1156,11 +1409,149 @@ class KlyrExtensionController {
       );
       await this.cleanupBackups(workspaceRoot);
       await this.recordDecisionMemory('success', applyResult.changedPaths);
+
+      // Open changed files for quick review.
+      for (const changedPath of applyResult.changedPaths) {
+        const fullPath = path.join(workspaceRoot, changedPath);
+        try {
+          const doc = await vscode.workspace.openTextDocument(fullPath);
+          await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
+        } catch (error) {
+          console.error(`[Klyr] Failed to open changed file ${fullPath}:`, error);
+        }
+      }
     }
 
     this.setStatus('idle', 'Execution finished.');
     await this.persistState();
     this.syncWebview();
+  }
+
+  private async stagePreviewEdits(
+    preview: DiffPreview,
+    workspaceRoot: string
+  ): Promise<{ stagedCount: number; errors: string[] }> {
+    this.stagedEdits.clear();
+    const errors: string[] = [];
+    let stagedCount = 0;
+
+    for (const change of preview.changes) {
+      if (change.operation !== 'update') {
+        continue;
+      }
+
+      try {
+        const absolutePath = path.join(workspaceRoot, change.path);
+        const fileUri = vscode.Uri.file(absolutePath);
+        const document = await vscode.workspace.openTextDocument(fileUri);
+        const editor = await vscode.window.showTextDocument(document, {
+          viewColumn: vscode.ViewColumn.One,
+          preview: false,
+        });
+
+        const originalContent = document.getText();
+        const nextContent = change.proposedContent ?? '';
+        if (originalContent === nextContent) {
+          continue;
+        }
+
+        const key = this.normalizeRelativePathForKey(change.path);
+        this.stagedEdits.set(key, {
+          path: change.path,
+          uri: fileUri,
+          originalContent,
+          proposedContent: nextContent,
+        });
+
+        const { addedLines, removedLines } = calculateLineRanges(originalContent, nextContent);
+        fileChangeDecorations.set(absolutePath, {
+          addedLines,
+          removedLines,
+          timestamp: Date.now(),
+        });
+
+        const shouldAnimate = nextContent.length <= 9000;
+        if (shouldAnimate) {
+          await this.animateEditorTyping(editor, nextContent);
+        } else {
+          const finalRange = new vscode.Range(
+            editor.document.positionAt(0),
+            editor.document.positionAt(editor.document.getText().length)
+          );
+          await editor.edit(
+            (editBuilder) => {
+              editBuilder.replace(finalRange, nextContent);
+            },
+            { undoStopBefore: true, undoStopAfter: true }
+          );
+        }
+
+        applyDecorationsForEditor(editor);
+        stagedCount += 1;
+      } catch (error) {
+        errors.push(`${change.path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    return { stagedCount, errors };
+  }
+
+  private async acceptStagedEdits(): Promise<ApplyResult> {
+    const result: ApplyResult = {
+      applied: 0,
+      rejected: 0,
+      changedPaths: [],
+      errors: [],
+    };
+
+    for (const staged of this.stagedEdits.values()) {
+      try {
+        const document = await vscode.workspace.openTextDocument(staged.uri);
+        const saved = await document.save();
+        if (!saved) {
+          result.errors.push({ path: staged.path, message: 'Could not save staged edit.' });
+          continue;
+        }
+        result.applied += 1;
+        result.changedPaths.push(staged.path);
+      } catch (error) {
+        result.errors.push({
+          path: staged.path,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return result;
+  }
+
+  private async discardStagedEdits(): Promise<void> {
+    for (const staged of this.stagedEdits.values()) {
+      try {
+        const document = await vscode.workspace.openTextDocument(staged.uri);
+        const editor = await vscode.window.showTextDocument(document, {
+          viewColumn: vscode.ViewColumn.One,
+          preview: false,
+        });
+
+        const range = new vscode.Range(
+          editor.document.positionAt(0),
+          editor.document.positionAt(editor.document.getText().length)
+        );
+        await editor.edit(
+          (editBuilder) => {
+            editBuilder.replace(range, staged.originalContent);
+          },
+          { undoStopBefore: true, undoStopAfter: true }
+        );
+        await document.save();
+        clearDecorationsForUri(staged.uri.fsPath);
+      } catch {
+        // Ignore revert errors for individual files.
+      }
+    }
+
+    this.stagedEdits.clear();
   }
 
   private async recordDecisionMemory(
@@ -1426,6 +1817,7 @@ class KlyrExtensionController {
 
   private async clearChatState(): Promise<void> {
     await this.archiveCurrentChatIfNeeded();
+    await this.discardStagedEdits();
     this.pendingPreview = undefined;
     this.lastPrompt = undefined;
     this.lastPlan = undefined;
@@ -1442,6 +1834,10 @@ class KlyrExtensionController {
     change: DiffPreview['changes'][number],
     workspaceRoot: string
   ): Promise<ApplyResult> {
+    if (change.operation === 'update' && change.proposedContent) {
+      return this.applyChangeWithEditorTyping(change, workspaceRoot);
+    }
+
     const executor = new FileSystemExecutor();
     return executor.apply(
       {
@@ -1453,6 +1849,100 @@ class KlyrExtensionController {
       },
       'accept',
       workspaceRoot
+    );
+  }
+
+  private async applyChangeWithEditorTyping(
+    change: DiffPreview['changes'][number],
+    workspaceRoot: string
+  ): Promise<ApplyResult> {
+    const result: ApplyResult = {
+      applied: 0,
+      rejected: 0,
+      changedPaths: [],
+      errors: [],
+    };
+
+    try {
+      const absolutePath = path.join(workspaceRoot, change.path);
+      const fileUri = vscode.Uri.file(absolutePath);
+      const document = await vscode.workspace.openTextDocument(fileUri);
+      const editor = await vscode.window.showTextDocument(document, {
+        viewColumn: vscode.ViewColumn.One,
+        preview: false,
+      });
+
+      const nextContent = change.proposedContent ?? '';
+      const currentContent = document.getText();
+
+      if (nextContent === currentContent) {
+        return result;
+      }
+
+      const shouldAnimate = nextContent.length <= 8000;
+      if (shouldAnimate) {
+        await this.animateEditorTyping(editor, nextContent);
+      } else {
+        const finalRange = new vscode.Range(
+          editor.document.positionAt(0),
+          editor.document.positionAt(editor.document.getText().length)
+        );
+        await editor.edit(
+          (editBuilder) => {
+            editBuilder.replace(finalRange, nextContent);
+          },
+          { undoStopBefore: true, undoStopAfter: true }
+        );
+      }
+
+      // Keep file dirty so VS Code shows native red/green inline diff markers.
+      result.applied = 1;
+      result.changedPaths.push(change.path);
+      return result;
+    } catch (error) {
+      result.errors.push({
+        path: change.path,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return result;
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async animateEditorTyping(editor: vscode.TextEditor, fullText: string): Promise<void> {
+    const clearRange = new vscode.Range(
+      editor.document.positionAt(0),
+      editor.document.positionAt(editor.document.getText().length)
+    );
+
+    await editor.edit(
+      (editBuilder) => {
+        editBuilder.replace(clearRange, '');
+      },
+      { undoStopBefore: true, undoStopAfter: false }
+    );
+
+    const chunkSize = fullText.length < 1200 ? 14 : fullText.length < 5000 ? 28 : 56;
+    for (let offset = 0; offset < fullText.length; offset += chunkSize) {
+      const chunk = fullText.slice(offset, offset + chunkSize);
+      const insertPos = editor.document.positionAt(editor.document.getText().length);
+      await editor.edit(
+        (editBuilder) => {
+          editBuilder.insert(insertPos, chunk);
+        },
+        { undoStopBefore: false, undoStopAfter: false }
+      );
+      await this.delay(16);
+    }
+
+    await editor.edit(
+      (_editBuilder) => {
+        // Establish final undo stop after typing sequence.
+      },
+      { undoStopBefore: false, undoStopAfter: true }
     );
   }
 

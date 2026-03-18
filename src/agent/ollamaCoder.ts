@@ -49,10 +49,8 @@ export class OllamaCoder implements Coder {
   }
 
   async generate(input: CoderInput): Promise<CodeDraft> {
-    // Store the first file path for potential fallback
-    if (input.context.files.length > 0) {
-      this.lastContextFile = input.context.files[0].path;
-    }
+    // Store the most relevant file path for fallback and repair.
+    this.lastContextFile = this.resolvePrimaryContextFile(input);
     
     const response = await this.client.chat({
       model: this.model,
@@ -200,6 +198,21 @@ If optimizing, make sure proposedContent includes ALL original code plus your im
       memory: input.context.memory,
       notes: input.context.notes ?? '',
     });
+  }
+
+  private resolvePrimaryContextFile(input: CoderInput): string {
+    if (input.context.files.length === 0) {
+      return 'unknown';
+    }
+
+    const promptLower = input.prompt.toLowerCase();
+    const mentioned = input.context.files.find((file) => {
+      const normalizedPath = file.path.replace(/\\/g, '/').toLowerCase();
+      const fileName = normalizedPath.split('/').pop() ?? normalizedPath;
+      return promptLower.includes(normalizedPath) || promptLower.includes(fileName);
+    });
+
+    return mentioned?.path ?? input.context.files[0].path;
   }
 
   private parseResponse(raw: string): CodeDraft {
@@ -444,6 +457,59 @@ If no changes should be made:
       }
     } catch {
       // Repair failed
+    }
+
+    // Second pass: synthesize concrete edits from prose suggestions using target file content.
+    const targetPath = this.resolvePrimaryContextFile(input);
+    const targetFile = input.context.files.find((file) => file.path === targetPath) ?? input.context.files[0];
+    if (targetFile && targetFile.content.trim()) {
+      const synthesizePrompt = `You are a precision code editor.
+The model gave prose instead of JSON edits. Convert that prose into a concrete file update.
+
+User request:
+${input.prompt.slice(0, 1200)}
+
+Model prose response:
+${raw.slice(0, 3000)}
+
+Target file path: ${targetFile.path}
+Original file content:
+${targetFile.content.slice(0, 25000)}
+
+Requirements:
+1. Return ONLY valid JSON.
+2. Use EXACT schema: {"summary": string, "changes": [{"path": string, "operation": "update", "proposedContent": string}]}
+3. proposedContent MUST be full final file content, not a diff.
+4. Preserve existing behavior and formatting unless the user asked to change it.
+5. If the request asks optimization, remove obvious duplication and simplify safely.
+
+Return only JSON.`;
+
+      try {
+        const synthesizedResponse = await this.client.chat({
+          model: this.model,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Output ONLY strict JSON for code changes. Do not include markdown or explanation text.',
+            },
+            {
+              role: 'user',
+              content: synthesizePrompt,
+            },
+          ],
+          temperature: 0,
+          stream: false,
+        });
+
+        const synthesized = this.parseResponse(synthesizedResponse.content);
+        if (synthesized.changes.length > 0) {
+          return synthesized;
+        }
+      } catch {
+        // Synthesis failed.
+      }
     }
     
     // Final fallback: show the response as explanation

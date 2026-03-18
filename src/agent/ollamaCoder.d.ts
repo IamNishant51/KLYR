@@ -16,6 +16,7 @@ export declare class OllamaCoder implements Coder {
     completeInline(input: InlineCompletionInput): Promise<string>;
     private buildEditSystemPrompt;
     private buildUserPrompt;
+    private resolvePrimaryContextFile;
     private parseResponse;
     private parseJsonDirect;
     private parseJsonFromMarkdown;

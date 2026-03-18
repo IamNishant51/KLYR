@@ -117,30 +117,40 @@ export class FileSystemExecutor implements Executor {
   private generateDiffHtml(diff: FileDiff): string {
     const lines: string[] = [];
 
-    // Header with file info and stats
-    const statusIcon = diff.operation === 'create' ? '+' : diff.operation === 'delete' ? '-' : '~';
-    const statusClass = diff.operation === 'create' ? 'diff-create' : diff.operation === 'delete' ? 'diff-delete' : 'diff-update';
-    const statusText = diff.operation === 'create' ? 'New file' : diff.operation === 'delete' ? 'Deleted' : 'Modified';
+    const statusClass = diff.operation === 'create' ? 'create' : diff.operation === 'delete' ? 'delete' : 'update';
+    const statusText = diff.operation === 'create' ? 'NEW FILE' : diff.operation === 'delete' ? 'DELETE' : 'MODIFY';
     
-    lines.push(`<div class="diff-file ${statusClass}" data-path="${this.escapeHtml(diff.filePath)}">`);
-    lines.push(`<div class="diff-header">`);
-    lines.push(`<span class="diff-status">${statusIcon} ${statusText}</span>`);
-    lines.push(`<span class="diff-path">${this.escapeHtml(diff.filePath)}</span>`);
-    lines.push(`<div class="diff-stats">`);
-    if (diff.additions > 0) lines.push(`<span class="diff-additions">+${diff.additions}</span>`);
-    if (diff.deletions > 0) lines.push(`<span class="diff-deletions">-${diff.deletions}</span>`);
-    lines.push(`</div></div>`);
+    lines.push(`<div style="margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden;">`);
+    
+    // Header with Copilot-style design
+    lines.push(`<div style="display: flex; align-items: center; padding: 8px 12px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.05);">`);
+    lines.push(`<span style="font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-right: 10px; ${
+      statusClass === 'create' ? 'background: rgba(126, 231, 135, 0.2); color: #7ee787;' :
+      statusClass === 'delete' ? 'background: rgba(248, 81, 73, 0.2); color: #f85149;' :
+      'background: rgba(123, 223, 246, 0.2); color: #7bdff6;'
+    }">${statusText}</span>`);
+    lines.push(`<span style="font-family: 'Consolas', monospace; font-size: 12px; color: #e6edf3; flex: 1;">${this.escapeHtml(diff.filePath)}</span>`);
+    lines.push(`<span style="font-size: 11px;">`);
+    if (diff.additions > 0) lines.push(`<span style="color: #7ee787;">+${diff.additions}</span> `);
+    if (diff.deletions > 0) lines.push(`<span style="color: #f85149;">-${diff.deletions}</span>`);
+    lines.push(`</span></div>`);
 
-    // Line-by-line diff
-    lines.push('<div class="diff-body">');
+    // Line-by-line diff with proper Copilot-style highlighting
+    lines.push('<div style="font-family: Consolas, monospace; font-size: 12px; overflow-x: auto;">');
     for (const line of diff.lines) {
-      const lineClass = line.type === 'added' ? 'diff-added' : line.type === 'removed' ? 'diff-removed' : 'diff-unchanged';
-      
-      lines.push(`<div class="diff-line ${lineClass}">`);
-      lines.push(`<span class="line-num old">${line.oldLineNumber ?? ''}</span>`);
-      lines.push(`<span class="line-num new">${line.newLineNumber ?? ''}</span>`);
-      lines.push(`<span class="line-prefix">${line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}</span>`);
-      lines.push(`<span class="line-content">${this.escapeHtml(line.content) || '&nbsp;'}</span>`);
+      const isAdded = line.type === 'added';
+      const isRemoved = line.type === 'removed';
+      const bgColor = isAdded ? 'rgba(126, 231, 135, 0.15)' : isRemoved ? 'rgba(248, 81, 73, 0.15)' : 'transparent';
+      const textColor = isAdded ? '#7ee787' : isRemoved ? '#f85149' : '#9fb0c3';
+      const prefixColor = isAdded ? '#7ee787' : isRemoved ? '#f85149' : 'rgba(255,255,255,0.3)';
+      const prefix = isAdded ? '+' : isRemoved ? '-' : ' ';
+      const borderLeft = (isAdded || isRemoved) ? `border-left: 3px solid ${prefixColor};` : '';
+
+      lines.push(`<div style="display: flex; ${bgColor ? 'background: ' + bgColor + ';' : ''} ${borderLeft} min-height: 20px; line-height: 20px;">`);
+      lines.push(`<span style="width: 45px; padding: 0 8px; text-align: right; color: rgba(255,255,255,0.25); user-select: none; border-right: 1px solid rgba(255,255,255,0.05);">${line.oldLineNumber ?? ''}</span>`);
+      lines.push(`<span style="width: 45px; padding: 0 8px; text-align: right; color: rgba(255,255,255,0.25); user-select: none; border-right: 1px solid rgba(255,255,255,0.05);">${line.newLineNumber ?? ''}</span>`);
+      lines.push(`<span style="width: 20px; padding: 0 4px; text-align: center; color: ${prefixColor}; user-select: none;">${prefix}</span>`);
+      lines.push(`<span style="flex: 1; padding: 0 8px; color: ${textColor}; white-space: pre;">${this.escapeHtml(line.content) || '&nbsp;'}</span>`);
       lines.push('</div>');
     }
     lines.push('</div></div>');

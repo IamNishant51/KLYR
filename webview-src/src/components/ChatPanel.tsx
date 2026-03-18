@@ -85,6 +85,7 @@ function ChatPanel({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [thinkingExpanded, setThinkingExpanded] = useState(false);
+  const [changesExpanded, setChangesExpanded] = useState(false);
   const compact = layoutMode !== 'regular';
 
   const shouldShowThinkingBubble =
@@ -113,6 +114,7 @@ function ChatPanel({
   const visibleVirtualItems = showVirtualizedList
     ? getVisibleVirtualItems(virtualItems, scrollTop, viewportHeight)
     : [];
+  const pendingFiles = Array.from(new Set(diffPreview.map((change) => change.path)));
 
   useEffect(() => {
     const scroller = scrollerRef.current;
@@ -151,6 +153,12 @@ function ChatPanel({
       setThinkingExpanded(false);
     }
   }, [thinkingTrace.length]);
+
+  useEffect(() => {
+    if (diffPreview.length > 0) {
+      setChangesExpanded(false);
+    }
+  }, [diffPreview.length]);
 
   const handleScroll = () => {
     const scroller = scrollerRef.current;
@@ -244,6 +252,7 @@ function ChatPanel({
                         item.message.id === SYNTHETIC_THINKING_ID ||
                         (item.message.id === latestAssistantId && isBusyPhase(phase))
                       }
+                      animateOnAppear={item.message.id === latestAssistantId}
                       draftActions={
                         diffAvailable && item.message.id === latestAssistantId
                           ? {
@@ -278,6 +287,7 @@ function ChatPanel({
                       message.id === SYNTHETIC_THINKING_ID ||
                       (message.id === latestAssistantId && isBusyPhase(phase))
                     }
+                    animateOnAppear={message.id === latestAssistantId}
                     draftActions={
                       diffAvailable && message.id === latestAssistantId
                         ? {
@@ -301,14 +311,25 @@ function ChatPanel({
                   background: 'color-mix(in srgb, var(--k-input-bg) 56%, transparent)',
                 }}
               >
-                <div className="text-[10px] font-medium uppercase tracking-[0.22em]" style={{ color: 'var(--k-muted)' }}>
-                  Agent Review
-                </div>
-                <div className="mt-1 text-sm font-medium" style={{ color: 'var(--k-fg)' }}>
-                  Klyr prepared file edits for review.
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-medium uppercase tracking-[0.22em]" style={{ color: 'var(--k-muted)' }}>
+                    Agent Review
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChangesExpanded((current) => !current)}
+                    className="rounded-full border px-2.5 py-1 text-[11px] font-medium"
+                    style={{
+                      borderColor: 'var(--k-input-border)',
+                      background: 'color-mix(in srgb, var(--k-surface) 72%, transparent)',
+                      color: 'var(--k-muted)',
+                    }}
+                  >
+                    {changesExpanded ? 'Collapse' : 'Expand'}
+                  </button>
                 </div>
                 <div className="mt-1 text-[12px] leading-6" style={{ color: 'var(--k-muted)' }}>
-                  Accept to apply changes to the workspace, or reject to discard the draft.
+                  {diffPreview.length} file{diffPreview.length === 1 ? '' : 's'} prepared. Expand to inspect full added/removed lines.
                 </div>
                 {(plan || contextRefs.length > 0 || ghostSuggestion) ? (
                   <div className="mt-2 text-[11px] leading-5" style={{ color: 'var(--k-muted)' }}>
@@ -318,18 +339,89 @@ function ChatPanel({
                   </div>
                 ) : null}
               </div>
-              <DiffViewer
-                changes={diffPreview}
-                onApply={onApplyDraft}
-                onReject={onRejectDraft}
-                compact={layoutMode !== 'regular'}
-              />
+              {changesExpanded ? (
+                <DiffViewer
+                  changes={diffPreview}
+                  onApply={onApplyDraft}
+                  onReject={onRejectDraft}
+                  compact={layoutMode !== 'regular'}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
       </div>
 
       <div className="mx-auto w-full max-w-5xl">
+        {pendingFiles.length > 0 ? (
+          <div
+            className={`mx-2 mb-2 rounded-2xl border ${narrow ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}
+            style={{
+              borderColor: 'var(--k-input-border)',
+              background: 'color-mix(in srgb, var(--k-input-bg) 62%, transparent)',
+            }}
+          >
+            <div className={`flex ${narrow ? 'flex-col gap-2' : 'items-center justify-between gap-3'}`}>
+              <div className="min-w-0">
+                <div className="text-[10px] font-medium uppercase tracking-[0.2em]" style={{ color: 'var(--k-muted)' }}>
+                  Pending edits
+                </div>
+                <div className="mt-1 text-xs font-medium" style={{ color: 'var(--k-fg)' }}>
+                  {pendingFiles.length} file{pendingFiles.length === 1 ? '' : 's'} changed
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {pendingFiles.slice(0, 4).map((filePath) => (
+                    <span
+                      key={filePath}
+                      className="max-w-[11rem] truncate rounded-full border px-2 py-0.5 text-[11px]"
+                      style={{
+                        borderColor: 'var(--k-input-border)',
+                        color: 'var(--k-muted)',
+                        background: 'color-mix(in srgb, var(--k-surface) 70%, transparent)',
+                      }}
+                      title={filePath}
+                    >
+                      {filePath}
+                    </span>
+                  ))}
+                  {pendingFiles.length > 4 ? (
+                    <span className="rounded-full border px-2 py-0.5 text-[11px]" style={{ borderColor: 'var(--k-input-border)', color: 'var(--k-muted)' }}>
+                      +{pendingFiles.length - 4} more
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onApplyDraft}
+                  className="rounded-full border px-3 py-1.5 text-xs font-medium"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--k-accent) 45%, transparent)',
+                    background: 'color-mix(in srgb, var(--k-selection) 58%, transparent)',
+                    color: 'var(--k-fg)',
+                  }}
+                >
+                  Keep
+                </button>
+                <button
+                  type="button"
+                  onClick={onRejectDraft}
+                  className="rounded-full border px-3 py-1.5 text-xs font-medium"
+                  style={{
+                    borderColor: 'var(--k-input-border)',
+                    background: 'color-mix(in srgb, var(--k-surface) 70%, transparent)',
+                    color: 'var(--k-muted)',
+                  }}
+                >
+                  Undo
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <InputBox
           inputValue={inputValue}
           onInputChange={onInputChange}

@@ -13,11 +13,12 @@ interface DraftActions {
 interface ChatMessageProps {
   message: ChatMessageType;
   streaming: boolean;
+  animateOnAppear?: boolean;
   draftActions?: DraftActions;
   layoutMode: PanelLayoutMode;
 }
 
-function ChatMessage({ message, streaming, draftActions, layoutMode }: ChatMessageProps) {
+function ChatMessage({ message, streaming, animateOnAppear = false, draftActions, layoutMode }: ChatMessageProps) {
   const [visibleContent, setVisibleContent] = useState(message.content);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -26,10 +27,13 @@ function ChatMessage({ message, streaming, draftActions, layoutMode }: ChatMessa
   const wrapperMaxWidth = narrow ? 'max-w-full' : compact ? 'max-w-[96%]' : 'max-w-[92%]';
 
   useEffect(() => {
-    if (!streaming) {
+    const shouldTypeAnimate = streaming || (animateOnAppear && message.role === 'assistant');
+    if (!shouldTypeAnimate) {
       setVisibleContent(message.content);
       return;
     }
+
+    setVisibleContent((current) => (streaming ? current : ''));
 
     let animationFrame = 0;
     const tick = () => {
@@ -55,9 +59,9 @@ function ChatMessage({ message, streaming, draftActions, layoutMode }: ChatMessa
 
     animationFrame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [message.content, streaming]);
+  }, [message.content, streaming, animateOnAppear, message.role]);
 
-  const renderedContent = streaming ? visibleContent : message.content;
+  const renderedContent = (streaming || (animateOnAppear && message.role === 'assistant')) ? visibleContent : message.content;
   const segments = parseMessageContent(renderedContent);
   const lastTextSegmentIndex = findLastTextSegmentIndex(segments);
 
