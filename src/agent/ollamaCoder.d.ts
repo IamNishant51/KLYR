@@ -9,6 +9,7 @@ export declare class OllamaCoder implements Coder {
     private readonly client;
     private readonly model;
     private readonly temperature;
+    private lastContextFile;
     constructor(options: OllamaCoderOptions);
     generate(input: CoderInput): Promise<CodeDraft>;
     answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer>;
@@ -16,7 +17,13 @@ export declare class OllamaCoder implements Coder {
     private buildEditSystemPrompt;
     private buildUserPrompt;
     private parseResponse;
-    private extractJson;
+    private parseJsonDirect;
+    private parseJsonFromMarkdown;
+    private parseJsonGreedy;
+    private parseFallback;
+    private toDraft;
     private stripCodeFences;
     private trimText;
+    private shouldAttemptRepair;
+    private repairDraftPayload;
 }

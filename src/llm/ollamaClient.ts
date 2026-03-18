@@ -100,6 +100,9 @@ export class HttpOllamaClient implements OllamaClient {
         return await this.executeRequest(request, stream, onChunk);
       } catch (error) {
         lastError = error;
+        if (this.isAbortOrTimeoutError(error)) {
+          break;
+        }
         attempt += 1;
 
         if (attempt > this.options.maxRetries) {
@@ -163,6 +166,28 @@ export class HttpOllamaClient implements OllamaClient {
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let lastContent = '';
+      let chunkBuffer = '';
+      let lastFlush = Date.now();
+      let hasCompleted = false;
+      const CHUNK_BUFFER_SIZE = 10;
+      const FLUSH_INTERVAL_MS = 16;
+
+      const flushBuffer = (done = false) => {
+        if (done && hasCompleted) {
+          return;
+        }
+        if (chunkBuffer.length > 0 || done) {
+          const payload = chunkBuffer;
+          if (payload.length > 0 || done) {
+            onChunk?.({ content: payload, done });
+          }
+          if (done) {
+            hasCompleted = true;
+          }
+          chunkBuffer = '';
+          lastFlush = Date.now();
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -184,15 +209,48 @@ export class HttpOllamaClient implements OllamaClient {
           const chunk = JSON.parse(trimmed);
           const content = chunk.message?.content ?? '';
           lastContent += content;
-          onChunk?.({ content, done: chunk.done === true });
+          chunkBuffer += content;
+
+          if (
+            chunk.done === true ||
+            chunkBuffer.length >= CHUNK_BUFFER_SIZE ||
+            Date.now() - lastFlush >= FLUSH_INTERVAL_MS
+          ) {
+            flushBuffer(chunk.done === true);
+          }
         }
       }
 
-      onChunk?.({ content: '', done: true });
+      flushBuffer(true);
       return { content: lastContent, done: true };
+    } catch (error) {
+      if (this.isAbortOrTimeoutError(error)) {
+        const seconds = Math.max(1, Math.round(this.options.timeoutMs / 1000));
+        throw new Error(
+          `Model response timed out after ${seconds}s. Increase klyr.ollama.timeoutMs or use a smaller/faster model.`
+        );
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private isAbortOrTimeoutError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as { name?: unknown; message?: unknown };
+    const name = typeof candidate.name === 'string' ? candidate.name.toLowerCase() : '';
+    const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+
+    return (
+      name.includes('abort') ||
+      message.includes('aborted') ||
+      message.includes('timeout') ||
+      message.includes('timed out')
+    );
   }
 
   private async delay(ms: number): Promise<void> {

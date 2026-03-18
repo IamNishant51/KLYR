@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildWebviewHtml = buildWebviewHtml;
-const chatPanel_1 = require("./components/chatPanel");
-const diffPreview_1 = require("./components/diffPreview");
 function buildWebviewHtml(nonce, state) {
     const initialState = state ?? {
         messages: [],
@@ -24,14 +22,11 @@ function buildWebviewHtml(nonce, state) {
       color-scheme: dark;
       --bg: #0d1117;
       --panel: #121a24;
-      --panel-soft: #172131;
-      --panel-border: #233145;
       --accent: #7bdff6;
       --accent-strong: #37c7e6;
       --text: #e6edf3;
       --muted: #9fb0c3;
       --success: #7ee787;
-      --warning: #f2cc60;
     }
 
     * {
@@ -40,481 +35,532 @@ function buildWebviewHtml(nonce, state) {
 
     body {
       margin: 0;
-      background:
-        radial-gradient(circle at top right, rgba(123, 223, 246, 0.08), transparent 28%),
-        linear-gradient(180deg, #0a0f15 0%, var(--bg) 100%);
+      padding: 0;
+      background: var(--bg);
       color: var(--text);
       font: 13px/1.45 "Segoe UI", "IBM Plex Sans", sans-serif;
       height: 100vh;
       overflow: hidden;
     }
 
-    .shell {
-      display: grid;
-      grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
-      gap: 14px;
-      height: 100vh;
-      padding: 14px;
-    }
-
-    .panel {
+    .container {
       display: flex;
       flex-direction: column;
-      min-height: 0;
-      background: rgba(18, 26, 36, 0.88);
-      border: 1px solid var(--panel-border);
-      border-radius: 18px;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.32);
+      height: 100vh;
+      background: var(--bg);
     }
 
-    .panel-header {
-      padding: 16px 18px 12px;
-      border-bottom: 1px solid rgba(35, 49, 69, 0.8);
-    }
-
-    .title-row {
+    .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(35, 49, 69, 0.5);
+      background: rgba(18, 26, 36, 0.5);
+      flex-shrink: 0;
     }
 
-    .title {
-      font-size: 15px;
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo {
       font-weight: 700;
-      letter-spacing: 0.02em;
+      font-size: 14px;
+      letter-spacing: 0.05em;
     }
 
-    .subtitle {
-      color: var(--muted);
-      margin-top: 4px;
+    .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      animation: pulse 2s infinite;
     }
 
-    .status-pill {
-      border-radius: 999px;
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    select {
+      background: rgba(23, 33, 49, 0.8);
+      color: var(--text);
+      border: 1px solid rgba(35, 49, 69, 0.8);
+      border-radius: 8px;
       padding: 6px 10px;
-      background: rgba(123, 223, 246, 0.12);
-      color: var(--accent);
-      border: 1px solid rgba(123, 223, 246, 0.26);
-      text-transform: capitalize;
-      white-space: nowrap;
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
     }
 
-    .chat-scroll {
+    select:hover {
+      border-color: rgba(35, 49, 69, 1);
+    }
+
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(123, 223, 246, 0.1);
+    }
+
+    select option {
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .content {
+      display: flex;
       flex: 1;
       min-height: 0;
-      overflow: auto;
-      padding: 14px 18px 6px;
+      gap: 0;
+    }
+
+    .chat-panel {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      flex: 1;
+      min-width: 0;
+      border-right: 1px solid rgba(35, 49, 69, 0.5);
+    }
+
+    .messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px;
     }
 
     .message {
-      border-radius: 16px;
-      border: 1px solid rgba(35, 49, 69, 0.9);
-      padding: 12px 14px;
-      max-width: 90%;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      animation: slideIn 0.2s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .message.user {
-      align-self: flex-end;
-      background: linear-gradient(180deg, rgba(55, 199, 230, 0.2), rgba(55, 199, 230, 0.1));
+      justify-content: flex-end;
     }
 
-    .message.assistant,
-    .message.system {
-      align-self: flex-start;
-      background: rgba(23, 33, 49, 0.82);
-    }
-
-    .message-role {
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 6px;
-    }
-
-    .message-content {
+    .message-bubble {
+      max-width: 70%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      word-wrap: break-word;
       white-space: pre-wrap;
-      word-break: break-word;
     }
 
-    .composer {
-      padding: 12px 18px 18px;
-      border-top: 1px solid rgba(35, 49, 69, 0.8);
+    .message.user .message-bubble {
+      background: linear-gradient(135deg, #0055aa, #0077dd);
+      color: var(--text);
+    }
+
+    .message.assistant .message-bubble {
+      background: rgba(23, 33, 49, 0.8);
+      border: 1px solid rgba(35, 49, 69, 0.8);
+      color: var(--text);
+    }
+
+    .empty-chat {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty-chat-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .composer-section {
+      padding: 16px;
+      border-top: 1px solid rgba(35, 49, 69, 0.5);
+      background: rgba(18, 26, 36, 0.5);
+      flex-shrink: 0;
     }
 
     textarea {
       width: 100%;
-      min-height: 110px;
+      min-height: 90px;
+      max-height: 200px;
       resize: vertical;
-      border: 1px solid rgba(35, 49, 69, 0.95);
-      border-radius: 14px;
-      background: rgba(9, 14, 20, 0.92);
+      background: rgba(9, 14, 20, 0.8);
       color: var(--text);
-      padding: 12px 14px;
+      border: 1px solid rgba(35, 49, 69, 0.8);
+      border-radius: 8px;
+      padding: 10px 12px;
       font: inherit;
       outline: none;
+      margin-bottom: 8px;
     }
 
     textarea:focus {
-      border-color: rgba(123, 223, 246, 0.8);
-      box-shadow: 0 0 0 3px rgba(123, 223, 246, 0.12);
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(123, 223, 246, 0.1);
     }
 
-    .composer-row {
+    .composer-actions {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      align-items: center;
+      gap: 10px;
     }
 
     .hint {
       color: var(--muted);
-      font-size: 12px;
+      font-size: 11px;
     }
 
     button {
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: #0d1117;
       border: 0;
-      border-radius: 12px;
-      background: linear-gradient(180deg, var(--accent), var(--accent-strong));
-      color: #052732;
-      font-weight: 700;
-      padding: 10px 16px;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-weight: 600;
+      font-size: 12px;
       cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(123, 223, 246, 0.3);
+    }
+
+    button:active {
+      transform: translateY(0);
     }
 
     button.secondary {
       background: transparent;
       color: var(--text);
-      border: 1px solid rgba(35, 49, 69, 0.95);
+      border: 1px solid rgba(35, 49, 69, 0.8);
     }
 
-    .side-scroll {
-      flex: 1;
-      min-height: 0;
-      overflow: auto;
-      padding: 14px 18px 18px;
+    button.secondary:hover {
+      background: rgba(35, 49, 69, 0.2);
+      box-shadow: none;
+    }
+
+    .sidebar {
+      width: 320px;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      overflow: hidden;
+      background: rgba(18, 26, 36, 0.3);
+    }
+
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid rgba(35, 49, 69, 0.5);
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .section {
-      background: rgba(16, 24, 34, 0.9);
-      border: 1px solid rgba(35, 49, 69, 0.95);
-      border-radius: 16px;
-      padding: 14px;
+      background: rgba(9, 14, 20, 0.6);
+      border: 1px solid rgba(35, 49, 69, 0.5);
+      border-radius: 10px;
+      padding: 12px;
     }
 
     .section-title {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
       color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
       margin-bottom: 10px;
     }
 
-    .card-title {
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-
-    .card-subtitle {
-      color: var(--muted);
-      margin: 12px 0 6px;
+    .item {
       font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .card-text {
-      margin: 0 0 8px;
-      white-space: pre-wrap;
-    }
-
-    .card-text.muted {
+      padding: 6px;
+      border-radius: 6px;
       color: var(--muted);
-    }
-
-    .compact-list {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--text);
-    }
-
-    .context-chip {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      background: rgba(23, 33, 49, 0.82);
-      border: 1px solid rgba(35, 49, 69, 0.9);
-      margin-bottom: 8px;
-    }
-
-    .context-path {
-      font-family: Consolas, "Courier New", monospace;
       word-break: break-word;
     }
 
-    .context-meta,
-    .diff-op {
-      color: var(--muted);
-      text-transform: uppercase;
-      font-size: 11px;
-      letter-spacing: 0.08em;
+    .item-path {
+      font-family: "Consolas", "Courier New", monospace;
     }
 
-    .diff-card {
-      border: 1px solid rgba(35, 49, 69, 0.95);
-      border-radius: 14px;
-      background: rgba(9, 14, 20, 0.78);
-      overflow: hidden;
-      margin-bottom: 12px;
-    }
-
-    .diff-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(35, 49, 69, 0.95);
-      font-family: Consolas, "Courier New", monospace;
-    }
-
-    .diff-summary {
-      padding: 10px 12px 0;
-      color: var(--muted);
-    }
-
-    .diff-body {
-      margin: 0;
-      padding: 10px 12px 12px;
-      overflow: auto;
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #dce7f3;
-    }
-
-    .diff-actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 12px;
-    }
-
-    .empty-state {
-      border: 1px dashed rgba(35, 49, 69, 0.95);
-      border-radius: 14px;
-      padding: 16px;
-      color: var(--muted);
-      background: rgba(9, 14, 20, 0.55);
-    }
-
-    .empty-state.small {
-      padding: 12px;
-      font-size: 12px;
-    }
-
-    @media (max-width: 900px) {
-      .shell {
-        grid-template-columns: 1fr;
+    @media (max-width: 768px) {
+      .content {
+        flex-direction: column;
       }
+
+      .chat-panel {
+        border-right: none;
+        border-bottom: 1px solid rgba(35, 49, 69, 0.5);
+      }
+
+      .sidebar {
+        width: 100%;
+        height: 200px;
+      }
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(123, 223, 246, 0.3);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(123, 223, 246, 0.5);
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="panel">
-      <header class="panel-header">
-        <div class="title-row">
-          <div>
-            <div class="title">Klyr Local Agent</div>
-            <div class="subtitle" id="statusDetail">${escapeHtml(initialState.statusDetail ?? '')}</div>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <div class="status-indicator"></div>
+        <div class="logo">Klyr</div>
+      </div>
+      <div class="header-controls">
+        <select id="modeSelect">
+          <option value="agent">Agent</option>
+          <option value="plan">Plan</option>
+        </select>
+        <select id="modelSelect"></select>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="chat-panel">
+        <div class="messages" id="messages">
+          <div class="empty-chat">
+            <div class="empty-chat-icon">💬</div>
+            <div>Ask me to fix, refactor, or explain your code</div>
           </div>
-          <div class="status-pill" id="statusPill">${escapeHtml(initialState.status)}</div>
         </div>
-      </header>
-      <div class="chat-scroll" id="chat">${(0, chatPanel_1.renderChatMessages)(initialState.messages)}</div>
-      <div class="composer">
-        <textarea id="promptInput" placeholder="Ask about the codebase, fix the current file, or request a refactor..."></textarea>
-        <div class="composer-row">
-          <div class="hint">Ctrl/Cmd+Enter to send. Diffed edits always require approval.</div>
-          <button id="sendButton">Send</button>
+        <div class="composer-section">
+          <textarea id="promptInput" placeholder="Ask Klyr anything..."></textarea>
+          <div class="composer-actions">
+            <div class="hint">Press Ctrl/Cmd+Enter to send</div>
+            <button id="sendButton">Send</button>
+          </div>
         </div>
       </div>
-    </section>
-    <aside class="panel">
-      <header class="panel-header">
-        <div class="title">Plan and Review</div>
-        <div class="subtitle">Sequential execution, validated changes, explicit approval.</div>
-      </header>
-      <div class="side-scroll">
-        <section class="section">
-          <div class="section-title">Plan</div>
-          <div id="planSection">${(0, diffPreview_1.renderPlanCard)(initialState.plan)}</div>
-        </section>
-        <section class="section">
-          <div class="section-title">Context</div>
-          <div id="contextSection">${(0, diffPreview_1.renderContextReferences)(initialState.contextRefs)}</div>
-        </section>
-        <section class="section">
-          <div class="section-title">Diff Preview</div>
-          <div id="diffSection">${(0, diffPreview_1.renderDiffPreview)(initialState.diffPreview ?? [])}</div>
-          <div class="diff-actions" id="diffActions" style="${(initialState.diffPreview ?? []).length > 0 ? '' : 'display:none;'}">
-            <button id="acceptDiff">Apply</button>
-            <button class="secondary" id="rejectDiff">Reject</button>
+
+      <div class="sidebar">
+        <div class="sidebar-header">Plan & Preview</div>
+        <div class="sidebar-scroll">
+          <div class="section">
+            <div class="section-title">Plan</div>
+            <div id="planSection" class="item">No plan yet</div>
           </div>
-        </section>
+          <div class="section">
+            <div class="section-title">Context</div>
+            <div id="contextSection" class="item">No files retrieved</div>
+          </div>
+          <div class="section">
+            <div class="section-title">Diff Preview</div>
+            <div id="diffSection" class="item">No changes pending</div>
+            <div id="diffActions" style="display:none; margin-top: 10px; gap: 8px;">
+              <button id="acceptDiff" style="flex:1;">Apply</button>
+              <button class="secondary" id="rejectDiff" style="flex:1;">Reject</button>
+            </div>
+          </div>
+        </div>
       </div>
-    </aside>
+    </div>
   </div>
+
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     let state = ${stateJson};
+    let config = { mode: 'agent', selectedModel: '', availableModels: [] };
 
-    const chatEl = document.getElementById('chat');
+    const messagesEl = document.getElementById('messages');
+    const promptInputEl = document.getElementById('promptInput');
+    const sendButtonEl = document.getElementById('sendButton');
+    const modeSelect = document.getElementById('modeSelect');
+    const modelSelect = document.getElementById('modelSelect');
     const planEl = document.getElementById('planSection');
     const contextEl = document.getElementById('contextSection');
     const diffEl = document.getElementById('diffSection');
     const diffActionsEl = document.getElementById('diffActions');
-    const statusPillEl = document.getElementById('statusPill');
-    const statusDetailEl = document.getElementById('statusDetail');
-    const promptInputEl = document.getElementById('promptInput');
-    const sendButtonEl = document.getElementById('sendButton');
 
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
     }
 
-    function renderMessages(messages) {
-      if (!messages.length) {
-        return '<div class="empty-state">Ask Klyr to explain, refactor, fix, or complete code.</div>';
+    function renderMessages() {
+      if (!state.messages || state.messages.length === 0) {
+        messagesEl.innerHTML = '<div class="empty-chat"><div class="empty-chat-icon">💬</div><div>Ask me to fix, refactor, or explain your code</div></div>';
+        return;
       }
 
-      return messages.map((message) => {
-        const content = escapeHtml(message.content || '').replace(/\\n/g, '<br>');
-        return [
-          '<article class="message ' + escapeHtml(message.role) + '">',
-          '<div class="message-role">' + escapeHtml(message.role) + '</div>',
-          '<div class="message-content">' + (content || '&nbsp;') + '</div>',
-          '</article>',
-        ].join('');
+      messagesEl.innerHTML = state.messages.map(msg => {
+        const isUser = msg.role === 'user';
+        return '<div class="message ' + (isUser ? 'user' : 'assistant') + '">' +
+          '<div class="message-bubble">' + escapeHtml(msg.content) + '</div>' +
+          '</div>';
       }).join('');
+
+      messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
-    function renderPlan(plan) {
-      if (!plan) {
-        return '<div class="empty-state small">No active plan.</div>';
+    function renderPlan() {
+      if (!state.plan) {
+        planEl.textContent = 'No plan yet';
+        return;
       }
-
-      const steps = (plan.steps || []).map((step) => '<li>' + escapeHtml(step) + '</li>').join('');
-      const guardrails = (plan.guardrails || []).map((item) => '<li>' + escapeHtml(item) + '</li>').join('');
-      return [
-        '<div class="card-block">',
-        '<div class="card-title">' + escapeHtml(plan.intent) + ' plan</div>',
-        '<p class="card-text">' + escapeHtml(plan.summary || '') + '</p>',
-        '<p class="card-text muted">' + escapeHtml(plan.goal || '') + '</p>',
-        '<ul class="compact-list">' + steps + '</ul>',
-        '<div class="card-subtitle">Guardrails</div>',
-        '<ul class="compact-list">' + guardrails + '</ul>',
-        '</div>',
-      ].join('');
+      const steps = (state.plan.steps || []).map(s => '• ' + escapeHtml(s)).join('\\n');
+      planEl.innerHTML = '<pre style="margin:0; font-size:11px; color:#9fb0c3;">' + escapeHtml(state.plan.intent + '\\n' + steps) + '</pre>';
     }
 
-    function renderContext(refs) {
-      if (!refs.length) {
-        return '<div class="empty-state small">No retrieved files yet.</div>';
+    function renderContext() {
+      if (!state.contextRefs || state.contextRefs.length === 0) {
+        contextEl.textContent = 'No files retrieved';
+        return;
       }
-
-      return refs.map((reference) => [
-        '<div class="context-chip">',
-        '<span class="context-path">' + escapeHtml(reference.path) + '</span>',
-        '<span class="context-meta">' + escapeHtml(reference.source) + '</span>',
-        '</div>',
-      ].join('')).join('');
+      contextEl.innerHTML = state.contextRefs.map(ref => '<div style="font-size:11px; padding:4px; color:#9fb0c3;">' + escapeHtml(ref.path) + '</div>').join('');
     }
 
-    function renderDiffs(changes) {
-      if (!changes.length) {
-        return '<div class="empty-state small">No diff preview pending.</div>';
+    function renderDiff() {
+      if (!state.diffPreview || state.diffPreview.length === 0) {
+        diffEl.textContent = 'No changes pending';
+        diffActionsEl.style.display = 'none';
+        return;
       }
-
-      return changes.map((change) => [
-        '<article class="diff-card">',
-        '<div class="diff-header"><span>' + escapeHtml(change.path) + '</span><span class="diff-op">' + escapeHtml(change.operation) + '</span></div>',
-        '<div class="diff-summary">' + escapeHtml(change.summary || '') + '</div>',
-        '<pre class="diff-body">' + escapeHtml(change.diff || '') + '</pre>',
-        '</article>',
-      ].join('')).join('');
+      diffActionsEl.style.display = 'flex';
+      diffEl.innerHTML = state.diffPreview.map(change => 
+        '<div style="font-size:11px; padding:6px; background:rgba(9,14,20,0.5); border-radius:6px; margin-bottom:6px;">' +
+        '<div style="color:#7bdff6;">' + escapeHtml(change.path) + '</div>' +
+        '<div style="color:#9fb0c3; margin-top:2px;">' + escapeHtml(change.operation) + '</div>' +
+        '</div>'
+      ).join('');
     }
 
     function render() {
-      chatEl.innerHTML = renderMessages(state.messages || []);
-      planEl.innerHTML = renderPlan(state.plan);
-      contextEl.innerHTML = renderContext(state.contextRefs || []);
-      diffEl.innerHTML = renderDiffs(state.diffPreview || []);
-      diffActionsEl.style.display = (state.diffPreview || []).length > 0 ? 'flex' : 'none';
-      statusPillEl.textContent = state.status || 'idle';
-      statusDetailEl.textContent = state.statusDetail || '';
-      chatEl.scrollTop = chatEl.scrollHeight;
+      renderMessages();
+      renderPlan();
+      renderContext();
+      renderDiff();
       vscode.setState(state);
+    }
+
+    async function fetchModels() {
+      try {
+        vscode.postMessage({ type: 'models:fetch' });
+      } catch (e) {
+        console.error('Failed to fetch models:', e);
+      }
     }
 
     function submitPrompt() {
       const text = promptInputEl.value.trim();
-      if (!text) {
-        return;
-      }
+      if (!text) return;
 
-      vscode.postMessage({ type: 'chat:submit', payload: text });
+      vscode.postMessage({ 
+        type: 'chat:submit', 
+        payload: text,
+        config: { mode: modeSelect.value, model: modelSelect.value }
+      });
       promptInputEl.value = '';
     }
 
     sendButtonEl.addEventListener('click', submitPrompt);
-    promptInputEl.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
+    promptInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
         submitPrompt();
       }
+    });
+
+    modeSelect.addEventListener('change', () => {
+      config.mode = modeSelect.value;
+      vscode.postMessage({ type: 'config:update', payload: config });
+    });
+
+    modelSelect.addEventListener('change', () => {
+      config.selectedModel = modelSelect.value;
+      vscode.postMessage({ type: 'config:update', payload: config });
     });
 
     document.getElementById('acceptDiff').addEventListener('click', () => {
       vscode.postMessage({ type: 'diff:decision', payload: 'accept' });
     });
+
     document.getElementById('rejectDiff').addEventListener('click', () => {
       vscode.postMessage({ type: 'diff:decision', payload: 'reject' });
     });
 
     window.addEventListener('message', (event) => {
-      if (!event.data || event.data.type !== 'state:update') {
-        return;
+      const msg = event.data;
+      if (!msg) return;
+
+      if (msg.type === 'state:update') {
+        state = msg.payload || state;
+        render();
+      } else if (msg.type === 'models:list') {
+        config.availableModels = msg.payload || [];
+        if (config.availableModels.length > 0) {
+          modelSelect.innerHTML = config.availableModels.map(m => '<option value="' + m + '">' + m + '</option>').join('');
+          config.selectedModel = config.availableModels[0];
+          modelSelect.value = config.selectedModel;
+        }
       }
-      state = event.data.payload || state;
-      render();
     });
 
     const restoredState = vscode.getState();
     if (restoredState) {
       state = restoredState;
     }
+
+    fetchModels();
     render();
   </script>
 </body>

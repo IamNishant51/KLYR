@@ -37,6 +37,7 @@ exports.PreviewOnlyExecutor = exports.FileSystemExecutor = void 0;
 const fs = __importStar(require("fs/promises"));
 const path = __importStar(require("path"));
 class FileSystemExecutor {
+    backupDirName = '.klyr-trash';
     async preview(draft, workspaceRoot) {
         const changes = [];
         for (const change of draft.changes) {
@@ -44,6 +45,16 @@ class FileSystemExecutor {
             const originalContent = await this.readExistingContent(resolvedPath);
             const proposedContent = change.proposedContent ?? '';
             const operation = change.operation ?? (originalContent ? 'update' : 'create');
+            const tempChange = {
+                ...change,
+                operation,
+                originalContent,
+                proposedContent,
+            };
+            const preservationError = this.validateContentPreservation(tempChange);
+            if (preservationError) {
+                console.error(`[KLYR] Content preservation warning: ${preservationError.message}`);
+            }
             changes.push({
                 ...change,
                 operation,
@@ -79,23 +90,36 @@ class FileSystemExecutor {
                     });
                     continue;
                 }
-                if (change.operation === 'delete') {
-                    result.errors.push({
-                        path: change.path,
-                        message: 'Delete operations are not enabled.',
-                    });
-                    continue;
-                }
-                if (!change.proposedContent) {
+                const operation = this.resolveOperation(change);
+                if (operation !== 'delete' && !change.proposedContent) {
                     result.errors.push({
                         path: change.path,
                         message: 'Missing proposed content.',
                     });
                     continue;
                 }
+                if (operation === 'delete') {
+                    const existsOnDisk = await this.pathExists(filePath);
+                    if (!existsOnDisk) {
+                        result.errors.push({
+                            path: change.path,
+                            message: 'Cannot delete because the file does not exist.',
+                        });
+                        continue;
+                    }
+                    const backupPath = await this.backupBeforeDelete(workspaceRoot, filePath, change.path);
+                    await fs.unlink(filePath);
+                    result.applied += 1;
+                    result.changedPaths.push(`${change.path} (backup: ${backupPath})`);
+                    continue;
+                }
+                const existingContent = await this.readExistingContent(filePath);
+                if (existingContent === (change.proposedContent ?? '')) {
+                    continue;
+                }
                 const dir = path.dirname(filePath);
                 await fs.mkdir(dir, { recursive: true });
-                await fs.writeFile(filePath, change.proposedContent, 'utf-8');
+                await fs.writeFile(filePath, change.proposedContent ?? '', 'utf-8');
                 result.applied += 1;
                 result.changedPaths.push(change.path);
             }
@@ -125,6 +149,57 @@ class FileSystemExecutor {
         catch {
             return '';
         }
+    }
+    resolveOperation(change) {
+        if (change.operation) {
+            return change.operation;
+        }
+        return change.originalContent ? 'update' : 'create';
+    }
+    async pathExists(candidatePath) {
+        try {
+            const stat = await fs.stat(candidatePath);
+            return stat.isFile();
+        }
+        catch {
+            return false;
+        }
+    }
+    async backupBeforeDelete(workspaceRoot, absolutePath, relativePath) {
+        const safeRelative = relativePath.replace(/[\\/:*?"<>|]/g, '_');
+        const backupFileName = `${Date.now()}-${safeRelative}.bak`;
+        const backupRoot = path.join(workspaceRoot, this.backupDirName);
+        const backupPath = path.join(backupRoot, backupFileName);
+        await fs.mkdir(backupRoot, { recursive: true });
+        const original = await fs.readFile(absolutePath, 'utf-8');
+        await fs.writeFile(backupPath, original, 'utf-8');
+        return path.relative(workspaceRoot, backupPath).replace(/\\/g, '/');
+    }
+    validateContentPreservation(change) {
+        if (change.operation === 'update' && change.originalContent) {
+            const originalLength = change.originalContent.length;
+            const proposedLength = change.proposedContent.length;
+            if (proposedLength < originalLength) {
+                const lostChars = originalLength - proposedLength;
+                const lostPercent = ((lostChars / originalLength) * 100).toFixed(1);
+                return {
+                    code: 'CONTENT_LOSS_DETECTED',
+                    message: `PROPOSED CONTENT LOSS: ${lostChars} characters (${lostPercent}%) of original file content would be deleted. This is likely an error. Original: ${originalLength} chars, Proposed: ${proposedLength} chars.`,
+                    file: change.path,
+                };
+            }
+            if (!change.proposedContent.includes(change.originalContent)) {
+                return {
+                    code: 'CONTENT_NOT_PRESERVED',
+                    message: `Original content not found in proposed changes for ${change.path}. The entire original file content must be preserved in the proposed update.`,
+                    file: change.path,
+                };
+            }
+        }
+        if (change.operation === 'delete') {
+            return null;
+        }
+        return null;
     }
 }
 exports.FileSystemExecutor = FileSystemExecutor;

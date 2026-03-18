@@ -7,14 +7,41 @@ class InMemoryContextEngine {
     documents = new Map();
     vectors = new Map();
     memory = [];
+    embeddingCache = new Map();
+    MAX_CACHE_SIZE = 500;
     constructor(embeddings) {
         this.embeddings = embeddings;
     }
     async index(documents) {
+        const activeIds = new Set(documents.map((document) => document.id));
+        for (const id of this.documents.keys()) {
+            if (!activeIds.has(id)) {
+                this.documents.delete(id);
+                this.vectors.delete(id);
+            }
+        }
+        const needsEmbedding = [];
         for (const doc of documents) {
             this.documents.set(doc.id, doc);
             const embedText = [doc.uri, doc.title ?? '', ...(doc.tags ?? []), doc.content].join('\n');
-            this.vectors.set(doc.id, await this.embeddings.embedText(embedText));
+            const cacheKey = this.getCacheKey(doc);
+            const cached = this.embeddingCache.get(cacheKey);
+            if (cached) {
+                this.vectors.set(doc.id, cached);
+            }
+            else {
+                needsEmbedding.push({ doc, embedText, cacheKey });
+            }
+        }
+        if (needsEmbedding.length > 0) {
+            const embedded = await Promise.all(needsEmbedding.map(async (item) => {
+                const vector = await this.embeddings.embedText(item.embedText);
+                return { ...item, vector };
+            }));
+            for (const item of embedded) {
+                this.addToCache(item.cacheKey, item.vector);
+                this.vectors.set(item.doc.id, item.vector);
+            }
         }
     }
     async query(input) {
@@ -66,6 +93,31 @@ class InMemoryContextEngine {
             return 0;
         }
         return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+    getCacheKey(doc) {
+        return this.simpleHash(doc.content);
+    }
+    addToCache(key, vector) {
+        if (this.embeddingCache.has(key)) {
+            this.embeddingCache.delete(key);
+        }
+        this.embeddingCache.set(key, vector);
+        while (this.embeddingCache.size > this.MAX_CACHE_SIZE) {
+            const firstKey = this.embeddingCache.keys().next().value;
+            if (!firstKey) {
+                break;
+            }
+            this.embeddingCache.delete(firstKey);
+        }
+    }
+    simpleHash(content) {
+        let hash = 0;
+        const length = Math.min(content.length, 1000);
+        for (let index = 0; index < length; index += 1) {
+            hash = (hash << 5) - hash + content.charCodeAt(index);
+            hash |= 0;
+        }
+        return hash.toString(16);
     }
 }
 exports.InMemoryContextEngine = InMemoryContextEngine;

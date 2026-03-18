@@ -20,8 +20,11 @@ export interface UiContextReference {
 export interface UiDiffChange {
     path: string;
     diff: string;
+    diffHtml?: string;
     summary: string;
     operation: 'create' | 'update' | 'delete';
+    additions: number;
+    deletions: number;
 }
 export interface WebviewState {
     messages: UiChatMessage[];
@@ -30,5 +33,7 @@ export interface WebviewState {
     plan?: UiPlan;
     contextRefs: UiContextReference[];
     diffPreview?: UiDiffChange[];
+    totalAdditions?: number;
+    totalDeletions?: number;
 }
 export declare function buildWebviewHtml(nonce: string, state?: WebviewState): string;

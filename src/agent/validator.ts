@@ -45,7 +45,7 @@ export class BasicValidator implements Validator {
           input.workspaceRoot,
           dependencyAllowlist,
           allowedPaths,
-          input.allowNewFiles ?? false
+          input.allowNewFiles ?? true
         ))
       );
     }
@@ -79,26 +79,20 @@ export class BasicValidator implements Validator {
     }
 
     const existsOnDisk = await this.pathExists(absolutePath);
-    if (existsOnDisk && allowedPaths.size > 0 && !allowedPaths.has(normalizedRelativePath)) {
-      errors.push({
-        code: 'UNVERIFIED_TARGET',
-        message: `Existing file was not part of the verified context set: ${relativePath}`,
-        file: change.path,
-      });
+    
+    // SKIP the UNVERIFIED_TARGET check for existing files
+    // The file exists, so we can edit it - no need to check if it was in retrieved context
+    // This allows editing any file in the workspace, not just retrieved ones
+    // For new files, we still check allowNewFiles flag
+
+    if (change.operation === 'delete') {
+      return errors;
     }
 
     if (!existsOnDisk && !allowNewFiles) {
       errors.push({
         code: 'NEW_FILE_NOT_ALLOWED',
-        message: `Creating new files is not allowed for this plan: ${relativePath}`,
-        file: change.path,
-      });
-    }
-
-    if (change.operation === 'delete') {
-      errors.push({
-        code: 'DELETE_NOT_SUPPORTED',
-        message: 'Delete operations are not enabled in deterministic mode.',
+        message: `Creating new files is disabled for this plan: ${relativePath}`,
         file: change.path,
       });
       return errors;
@@ -111,6 +105,15 @@ export class BasicValidator implements Validator {
         file: change.path,
       });
       return errors;
+    }
+
+    let originalContent = '';
+    if (existsOnDisk) {
+      try {
+        originalContent = await fs.readFile(absolutePath, 'utf-8');
+      } catch {
+        originalContent = '';
+      }
     }
 
     const scriptKind = this.scriptKindForPath(absolutePath);
@@ -138,8 +141,66 @@ export class BasicValidator implements Validator {
       }
     }
 
+    const integrityError = this.validateContentIntegrity(change, originalContent);
+    if (integrityError) {
+      errors.push(integrityError);
+    }
+
     errors.push(...this.detectUnsafePatterns(proposedContent, change.path));
     return errors;
+  }
+
+  private validateContentIntegrity(
+    change: DraftFileChange,
+    originalContent: string
+  ): ValidationError | null {
+    if (change.operation === 'create') {
+      return null;
+    }
+
+    if (change.operation === 'delete') {
+      return null;
+    }
+
+    if (!originalContent) {
+      return null;
+    }
+
+    const proposedContent = change.proposedContent ?? '';
+
+    if (proposedContent.length < originalContent.length) {
+      return {
+        code: 'CONTENT_TRUNCATION',
+        message: `Proposed content (${proposedContent.length} chars) is shorter than original (${originalContent.length} chars). This would delete ${originalContent.length - proposedContent.length} characters. Please preserve all original content.`,
+        file: change.path,
+      };
+    }
+
+    if (!proposedContent.includes(originalContent)) {
+      const missingContent = this.findMissingContent(originalContent, proposedContent);
+      return {
+        code: 'CONTENT_LOSS',
+        message: `Original content was not preserved in ${change.path}. Missing approximately ${missingContent} characters. All original file content must be included in the update.`,
+        file: change.path,
+      };
+    }
+
+    return null;
+  }
+
+  private findMissingContent(original: string, proposed: string): number {
+    let commonLength = 0;
+    const maxCheck = Math.min(original.length, 500);
+
+    for (let i = 0; i < maxCheck; i += 1) {
+      if (original[i] === proposed[i]) {
+        commonLength += 1;
+      } else {
+        break;
+      }
+    }
+
+    return Math.max(0, original.length - commonLength);
   }
 
   private parseDiagnostics(

@@ -104,8 +104,16 @@ export class Pipeline {
         };
       }
 
+      const planTargets = plan.targetHints.slice(0, 3).join(', ');
+      const planDetail = `Intent: ${plan.intent}. Mode: ${plan.mode}. ${planTargets ? `Targets: ${planTargets}.` : 'Using active workspace context.'}`;
+      await this.emitStage(callbacks, 'planning', planDetail);
+
       await this.emitStage(callbacks, 'retrieving', 'Gathering active editor, workspace, and memory context.');
-      await this.contextEngine.index(context.documents);
+      const indexPromise = this.contextEngine.index(context.documents);
+      const memoryMatchesPromise = this.memory.query(context.prompt, 4);
+      const recentMemoryPromise = this.memory.recent(4);
+
+      await indexPromise;
       const contextMatches = await this.contextEngine.query({
         query: [context.prompt, plan.intent, context.activeFilePath ?? '', context.selection ?? ''].join('\n'),
         maxResults: finalConfig.retrievalMaxResults,
@@ -113,14 +121,29 @@ export class Pipeline {
       const retrievedDocuments = uniqueDocumentsByPath(contextMatches.map((match) => match.document));
       const mentionedDocuments = this.findPromptMentionedDocuments(context.prompt, context.documents);
       const finalDocuments = uniqueDocumentsByPath([...mentionedDocuments, ...retrievedDocuments]);
-      const memoryMatches = await this.memory.query(context.prompt, 4);
-      const recentMemory = await this.memory.recent(4);
+      const [memoryMatches, recentMemory] = await Promise.all([
+        memoryMatchesPromise,
+        recentMemoryPromise,
+      ]);
       const memoryContext = formatMemoryForContext([...memoryMatches, ...recentMemory].slice(0, 6));
       const coderContext = this.buildCoderContext(context, finalDocuments, memoryContext);
       const contextSummary = summarizeContext(finalDocuments);
+      const retrievedPreview = finalDocuments
+        .slice(0, 4)
+        .map((document) => this.toRelativePath(context.workspaceRoot, document.uri))
+        .join(', ');
+      await this.emitStage(
+        callbacks,
+        'retrieving',
+        `Retrieved ${finalDocuments.length} context file${finalDocuments.length === 1 ? '' : 's'}${retrievedPreview ? `: ${retrievedPreview}` : ''}`
+      );
 
       if (plan.mode === 'chat') {
-        await this.emitStage(callbacks, 'thinking', 'Answering with retrieved workspace context.');
+        await this.emitStage(
+          callbacks,
+          'thinking',
+          `Composing answer from ${finalDocuments.length} retrieved file${finalDocuments.length === 1 ? '' : 's'} and recent memory.`
+        );
         const answer = await this.coder.answer(
           this.buildCoderInput(context.prompt, plan, coderContext),
           callbacks.onAnswerChunk
@@ -148,7 +171,11 @@ export class Pipeline {
         };
       }
 
-      await this.emitStage(callbacks, 'thinking', 'Generating deterministic output from verified context.');
+      await this.emitStage(
+        callbacks,
+        'thinking',
+        `Generating deterministic edits (${plan.steps.length} planned step${plan.steps.length === 1 ? '' : 's'}) from verified context.`
+      );
       const fixerResult = await runFixerLoop({
         coder: this.coder,
         validator: this.validator,
@@ -203,7 +230,11 @@ export class Pipeline {
         };
       }
 
-      await this.emitStage(callbacks, 'validating', 'Validation passed. Preparing the diff preview.');
+      await this.emitStage(
+        callbacks,
+        'validating',
+        `Validation passed on attempt ${fixerResult.attempts}. Preparing diff preview.`
+      );
       const preview = await this.executor.preview(fixerResult.draft, context.workspaceRoot);
       await this.emitStage(callbacks, 'review', 'Diff preview ready for user approval.');
 

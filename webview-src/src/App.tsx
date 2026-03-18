@@ -6,11 +6,17 @@ import React, {
   useState,
 } from 'react';
 import ChatPanel from './components/ChatPanel';
-import { deriveUiPhase, isBusyPhase } from './lib/chat';
+import { buildGhostSuggestion, deriveUiPhase, isBusyPhase } from './lib/chat';
 import type {
   ChatMessage,
+  ContextReference,
+  DiffChange,
   ExtensionStatus,
+  Plan,
+  ThinkingTraceEntry,
 } from './types';
+
+export type PanelLayoutMode = 'narrow' | 'compact' | 'regular';
 
 declare global {
   interface Window {
@@ -33,18 +39,30 @@ function getVsCodeApi() {
 
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatMode, setChatMode] = useState<'agent' | 'plan'>('agent');
   const [selectedModel, setSelectedModel] = useState('qwen2.5-coder');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('idle');
   const [statusDetail, setStatusDetail] = useState('');
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [contextRefs, setContextRefs] = useState<ContextReference[]>([]);
+  const [diffPreview, setDiffPreview] = useState<DiffChange[]>([]);
+  const [thinkingTrace, setThinkingTrace] = useState<ThinkingTraceEntry[]>([]);
   const [viewportWidth, setViewportWidth] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const vscodeRef = useRef(getVsCodeApi());
+  const lastThinkingKeyRef = useRef('');
   const deferredMessages = useDeferredValue(messages);
   const phase = deriveUiPhase(extensionStatus, statusDetail);
   const busy = isBusyPhase(phase);
-  const compact = viewportWidth > 0 && viewportWidth < 980;
+  const ghostSuggestion = buildGhostSuggestion(diffPreview, messages);
+  const layoutMode: PanelLayoutMode =
+    viewportWidth > 0 && viewportWidth < 520
+      ? 'narrow'
+      : viewportWidth > 0 && viewportWidth < 860
+      ? 'compact'
+      : 'regular';
 
   useEffect(() => {
     const root = rootRef.current;
@@ -86,12 +104,38 @@ function App() {
 
       if (message.type === 'state:update') {
         const state = message.payload ?? {};
+        const nextStatus = (state.status ?? 'idle') as ExtensionStatus;
+        const nextStatusDetail = String(state.statusDetail ?? '');
+
+        if (
+          nextStatus !== 'idle' &&
+          nextStatus !== 'review' &&
+          nextStatusDetail.trim()
+        ) {
+          const traceKey = `${nextStatus}:${nextStatusDetail}`;
+          if (lastThinkingKeyRef.current !== traceKey) {
+            lastThinkingKeyRef.current = traceKey;
+            setThinkingTrace((previousTrace) => [
+              ...previousTrace.slice(-7),
+              {
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                status: nextStatus,
+                detail: nextStatusDetail,
+                createdAt: Date.now(),
+              },
+            ]);
+          }
+        }
+
         startTransition(() => {
           if (Array.isArray(state.messages)) {
             setMessages(state.messages);
           }
-          setExtensionStatus(state.status ?? 'idle');
-          setStatusDetail(state.statusDetail ?? '');
+          setExtensionStatus(nextStatus);
+          setStatusDetail(nextStatusDetail);
+          setPlan(state.plan ?? null);
+          setContextRefs(Array.isArray(state.contextRefs) ? state.contextRefs : []);
+          setDiffPreview(Array.isArray(state.diffPreview) ? state.diffPreview : []);
         });
       }
     };
@@ -117,14 +161,19 @@ function App() {
       setMessages((prevMessages) => [...prevMessages, optimisticMessage]);
       setExtensionStatus('thinking');
       setStatusDetail('Handing your request to Klyr.');
+      setThinkingTrace([]);
     });
+    lastThinkingKeyRef.current = '';
     setInputValue('');
 
     const vscode = vscodeRef.current;
     if (vscode) {
       vscode.postMessage({
         type: 'chat:submit',
-        payload: prompt,
+        payload: {
+          prompt,
+          modeHint: chatMode === 'agent' ? 'edit' : 'chat',
+        },
         config: { selectedModel },
       });
     }
@@ -164,17 +213,48 @@ function App() {
     }
   };
 
+  const handleOpenHistory = () => {
+    const vscode = vscodeRef.current;
+    if (vscode) {
+      vscode.postMessage({ type: 'chat:history' });
+    }
+  };
+
   const handleNewChat = () => {
     startTransition(() => {
       setMessages([]);
       setExtensionStatus('idle');
       setStatusDetail('');
+      setPlan(null);
+      setContextRefs([]);
+      setDiffPreview([]);
+      setThinkingTrace([]);
     });
+    lastThinkingKeyRef.current = '';
 
     const vscode = vscodeRef.current;
     if (vscode) {
       vscode.postMessage({ type: 'chat:clear' });
     }
+  };
+
+  const handleApplyDraft = () => {
+    const vscode = vscodeRef.current;
+    if (vscode) {
+      vscode.postMessage({ type: 'diff:decision', payload: 'accept' });
+    }
+  };
+
+  const handleRejectDraft = () => {
+    const vscode = vscodeRef.current;
+    if (vscode) {
+      vscode.postMessage({ type: 'diff:decision', payload: 'reject' });
+    }
+  };
+
+  const handleOpenDiff = () => {
+    const diffSection = document.getElementById('klyr-diff-preview');
+    diffSection?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   return (
@@ -184,5 +264,32 @@ function App() {
           messages={deferredMessages}
           phase={phase}
           statusDetail={statusDetail}
+          plan={plan}
+          contextRefs={contextRefs}
+          diffPreview={diffPreview}
+          ghostSuggestion={ghostSuggestion}
+          thinkingTrace={thinkingTrace}
           inputValue={inputValue}
-          onInpu
+          onInputChange={setInputValue}
+          selectedModel={selectedModel}
+          availableModels={availableModels}
+          onModelChange={handleModelChange}
+          chatMode={chatMode}
+          onChatModeChange={setChatMode}
+          onSendMessage={handleSendMessage}
+          onStopMessage={handleStopMessage}
+          onOpenHistory={handleOpenHistory}
+          onOpenSettings={handleOpenSettings}
+          onNewChat={handleNewChat}
+          onApplyDraft={handleApplyDraft}
+          onRejectDraft={handleRejectDraft}
+          onOpenDiff={handleOpenDiff}
+          diffAvailable={diffPreview.length > 0}
+          layoutMode={layoutMode}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default App;

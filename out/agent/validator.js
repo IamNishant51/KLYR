@@ -50,7 +50,7 @@ class BasicValidator {
         const allowedPaths = new Set((input.allowedRelativePaths ?? []).map((value) => this.normalizeRelativePath(value)));
         const errors = [];
         for (const change of input.draft.changes) {
-            errors.push(...(await this.validateChange(change, input.workspaceRoot, dependencyAllowlist, allowedPaths, input.allowNewFiles ?? false)));
+            errors.push(...(await this.validateChange(change, input.workspaceRoot, dependencyAllowlist, allowedPaths, input.allowNewFiles ?? true)));
         }
         return {
             ok: errors.length === 0,
@@ -79,17 +79,15 @@ class BasicValidator {
                 file: change.path,
             });
         }
+        if (change.operation === 'delete') {
+            // Deletions are allowed. The executor performs workspace safety checks and backup creation.
+            return errors;
+        }
         if (!existsOnDisk && !allowNewFiles) {
+            // New files are allowed by default. Keep this guard for opt-out scenarios only.
             errors.push({
                 code: 'NEW_FILE_NOT_ALLOWED',
-                message: `Creating new files is not allowed for this plan: ${relativePath}`,
-                file: change.path,
-            });
-        }
-        if (change.operation === 'delete') {
-            errors.push({
-                code: 'DELETE_NOT_SUPPORTED',
-                message: 'Delete operations are not enabled in deterministic mode.',
+                message: `Creating new files is disabled for this plan: ${relativePath}`,
                 file: change.path,
             });
             return errors;
@@ -101,6 +99,15 @@ class BasicValidator {
                 file: change.path,
             });
             return errors;
+        }
+        let originalContent = '';
+        if (existsOnDisk) {
+            try {
+                originalContent = await fs.readFile(absolutePath, 'utf-8');
+            }
+            catch {
+                originalContent = '';
+            }
         }
         const scriptKind = this.scriptKindForPath(absolutePath);
         if (scriptKind !== undefined) {
@@ -120,8 +127,53 @@ class BasicValidator {
                 }
             }
         }
+        const integrityError = this.validateContentIntegrity(change, originalContent);
+        if (integrityError) {
+            errors.push(integrityError);
+        }
         errors.push(...this.detectUnsafePatterns(proposedContent, change.path));
         return errors;
+    }
+    validateContentIntegrity(change, originalContent) {
+        if (change.operation === 'create') {
+            return null;
+        }
+        if (change.operation === 'delete') {
+            return null;
+        }
+        if (!originalContent) {
+            return null;
+        }
+        const proposedContent = change.proposedContent ?? '';
+        if (proposedContent.length < originalContent.length) {
+            return {
+                code: 'CONTENT_TRUNCATION',
+                message: `Proposed content (${proposedContent.length} chars) is shorter than original (${originalContent.length} chars). This would delete ${originalContent.length - proposedContent.length} characters. Please preserve all original content.`,
+                file: change.path,
+            };
+        }
+        if (!proposedContent.includes(originalContent)) {
+            const missingContent = this.findMissingContent(originalContent, proposedContent);
+            return {
+                code: 'CONTENT_LOSS',
+                message: `Original content was not preserved in ${change.path}. Missing approximately ${missingContent} characters. All original file content must be included in the update.`,
+                file: change.path,
+            };
+        }
+        return null;
+    }
+    findMissingContent(original, proposed) {
+        let commonLength = 0;
+        const maxCheck = Math.min(original.length, 500);
+        for (let i = 0; i < maxCheck; i += 1) {
+            if (original[i] === proposed[i]) {
+                commonLength += 1;
+            }
+            else {
+                break;
+            }
+        }
+        return Math.max(0, original.length - commonLength);
     }
     parseDiagnostics(filePath, content, scriptKind) {
         const diagnostics = [];

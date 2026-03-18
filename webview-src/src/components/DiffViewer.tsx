@@ -11,7 +11,7 @@ interface DiffViewerProps {
 function DiffViewer({ changes, onApply, onReject, compact = false }: DiffViewerProps) {
   if (changes.length === 0) {
     return (
-      <div className="rounded-[24px] border border-dashed border-white/8 bg-white/[0.02] px-4 py-5 text-sm text-slate-500">
+      <div className={`border border-dashed border-white/8 bg-white/[0.02] text-slate-500 ${compact ? 'rounded-[20px] px-3 py-4 text-[13px] leading-6' : 'rounded-[24px] px-4 py-5 text-sm'}`}>
         No diff is waiting right now. Draft edits will appear here with additions, deletions, and quick review controls.
       </div>
     );
@@ -24,15 +24,15 @@ function DiffViewer({ changes, onApply, onReject, compact = false }: DiffViewerP
         return (
           <section
             key={`${change.path}-${change.summary}`}
-            className="overflow-hidden rounded-[24px] border border-white/8 bg-[#10161d] shadow-[0_18px_40px_rgba(0,0,0,0.24)]"
+            className={`overflow-hidden border border-white/8 bg-[#10161d] shadow-[0_18px_40px_rgba(0,0,0,0.24)] ${compact ? 'rounded-[20px]' : 'rounded-[24px]'}`}
           >
-            <header className="flex items-start justify-between gap-3 border-b border-white/6 bg-white/[0.03] px-4 py-3">
+            <header className={`border-b border-white/6 bg-white/[0.03] ${compact ? 'space-y-2 px-3 py-3' : 'flex items-start justify-between gap-3 px-4 py-3'}`}>
               <div className="min-w-0">
                 <div className="truncate font-mono text-[12px] text-slate-200">{change.path}</div>
                 <div className="mt-1 text-xs leading-6 text-slate-500">{change.summary}</div>
               </div>
 
-              <div className="flex shrink-0 items-center gap-2">
+              <div className={`flex ${compact ? 'flex-wrap gap-1.5' : 'shrink-0 items-center gap-2'}`}>
                 <span className="rounded-full border border-white/8 bg-white/[0.04] px-2.5 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">
                   {change.operation}
                 </span>
@@ -51,7 +51,7 @@ function DiffViewer({ changes, onApply, onReject, compact = false }: DiffViewerP
                 return (
                   <div
                     key={`${change.path}-line-${index}`}
-                    className={`grid grid-cols-[auto_1fr] items-start gap-3 px-4 py-1 font-mono text-[12px] leading-6 ${diffLineClass(lineKind)}`}
+                    className={`grid grid-cols-[auto_1fr] items-start font-mono ${compact ? 'gap-2 px-3 py-1 text-[11px] leading-5' : 'gap-3 px-4 py-1 text-[12px] leading-6'} ${diffLineClass(lineKind)}`}
                   >
                     <span className="select-none opacity-70">
                       {lineKind === 'meta' ? '@' : line[0] || ' '}

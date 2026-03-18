@@ -43,7 +43,7 @@ export function defaultConfig(): KlyrConfig {
       baseUrl: 'http://localhost:11434',
       model: 'qwen2.5-coder',
       temperature: 0,
-      timeoutMs: 60000,
+      timeoutMs: 180000,
       maxRetries: 2,
       retryBackoffMs: 800,
     },

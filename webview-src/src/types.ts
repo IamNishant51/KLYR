@@ -29,6 +29,13 @@ export interface DiffChange {
   operation: 'create' | 'update' | 'delete';
 }
 
+export interface ThinkingTraceEntry {
+  id: string;
+  status: ExtensionStatus;
+  detail: string;
+  createdAt: number;
+}
+
 export type ExtensionStatus =
   | 'idle'
   | 'planning'

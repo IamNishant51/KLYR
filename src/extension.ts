@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { BasicPlanner, type PlanMode, type PlanResult } from './agent/planner';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { BasicPlanner, LLMPoweredPlanner, type PlanMode, type PlanResult } from './agent/planner';
 import { FileSystemExecutor, type DiffPreview } from './agent/executor';
 import { BasicValidator } from './agent/validator';
 import { OllamaCoder } from './agent/ollamaCoder';
@@ -8,7 +10,7 @@ import {
   chunkContextDocument,
   type ContextDocument,
 } from './context/contextEngine';
-import { NaiveEmbeddingProvider } from './context/embeddings';
+import { OllamaEmbeddingProvider } from './context/embeddings';
 import { formatMemoryForContext, hydrateMemoryEntries, InMemoryStore } from './context/memory';
 import {
   buildWorkspaceOutline,
@@ -21,8 +23,8 @@ import { ContextOrchestrator, type ContextRequest } from './context/orchestrator
 import { HttpOllamaClient } from './llm/ollamaClient';
 import { defaultConfig, Logger, type KlyrConfig } from './core/config';
 import { Pipeline, type PipelineStage } from './core/pipeline';
+import type { ApplyResult } from './agent/executor';
 import {
-  buildWebviewHtml,
   type UiChatMessage,
   type UiContextReference,
   type UiDiffChange,
@@ -45,6 +47,13 @@ interface RuntimeContext {
 
 const SESSION_STATE_KEY = 'klyr.chatSession';
 const MEMORY_STATE_KEY = 'klyr.memoryEntries';
+const CHAT_HISTORY_STATE_KEY = 'klyr.chatHistory';
+
+interface ChatHistoryEntry {
+  id: string;
+  createdAt: number;
+  messages: UiChatMessage[];
+}
 
 /**
  * WebviewViewProvider for the Klyr sidebar chat view
@@ -210,7 +219,7 @@ class KlyrChatViewProvider implements vscode.WebviewViewProvider {
       }
 
       webviewView.webview.html = html;
-      this.controller.attachSidebarView(webviewView);
+      this.controller.attachChatView(webviewView);
 
       // Handle messages from the webview
       webviewView.webview.onDidReceiveMessage((message) => {
@@ -222,6 +231,78 @@ class KlyrChatViewProvider implements vscode.WebviewViewProvider {
       logger.error(`Failed to resolve webview: ${errorMsg}`);
       webviewView.webview.html = `<html><body><p>Error loading chat panel: ${errorMsg}</p></body></html>`;
     }
+  }
+}
+
+class KlyrLauncherViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'klyr.chatLauncher';
+
+  constructor(private readonly controller: KlyrExtensionController) {}
+
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken,
+  ) {
+    webviewView.webview.options = {
+      enableScripts: false,
+    };
+
+    webviewView.webview.html = `
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <style>
+            body {
+              margin: 0;
+              padding: 20px 18px;
+              font-family: var(--vscode-font-family);
+              color: var(--vscode-foreground);
+              background: var(--vscode-sideBar-background);
+            }
+
+            .card {
+              border: 1px solid var(--vscode-panel-border);
+              border-radius: 14px;
+              padding: 14px 14px 12px;
+              background: color-mix(in srgb, var(--vscode-editor-background) 82%, transparent);
+            }
+
+            .eyebrow {
+              font-size: 11px;
+              text-transform: uppercase;
+              letter-spacing: 0.16em;
+              color: var(--vscode-descriptionForeground);
+              margin-bottom: 8px;
+            }
+
+            .title {
+              font-size: 14px;
+              font-weight: 600;
+              margin-bottom: 8px;
+            }
+
+            .copy {
+              font-size: 12px;
+              line-height: 1.6;
+              color: var(--vscode-descriptionForeground);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="eyebrow">Klyr</div>
+            <div class="title">Opening chat on the right...</div>
+            <div class="copy">
+              This launcher keeps the real Klyr chat in a dedicated right-side panel instead of the file sidebar.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    this.controller.launchChatFromSidebar();
   }
 }
 
@@ -243,6 +324,9 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.commands.registerCommand('klyr.optimizeCurrentFile', () =>
         controller.runCurrentFileAction('Optimize')
       ),
+      vscode.commands.registerCommand('klyr.viewDiffInEditor', () =>
+        controller.viewDiffInEditor()
+      ),
       vscode.languages.registerInlineCompletionItemProvider(
         [
           { language: 'typescript' },
@@ -261,7 +345,20 @@ export function activate(context: vscode.ExtensionContext) {
         KlyrChatViewProvider.viewType,
         new KlyrChatViewProvider(context, controller),
         { webviewOptions: { retainContextWhenHidden: true } }
+      ),
+      vscode.window.registerWebviewViewProvider(
+        KlyrLauncherViewProvider.viewType,
+        new KlyrLauncherViewProvider(controller),
+        { webviewOptions: { retainContextWhenHidden: false } }
       )
+    );
+
+    const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*');
+    context.subscriptions.push(fileWatcher);
+    context.subscriptions.push(
+      fileWatcher.onDidChange(() => controller.invalidateIndexCache()),
+      fileWatcher.onDidCreate(() => controller.invalidateIndexCache()),
+      fileWatcher.onDidDelete(() => controller.invalidateIndexCache())
     );
 
     logger.debug('Klyr extension activated successfully');
@@ -284,18 +381,24 @@ class KlyrExtensionController {
     enableMemory: true,
   });
   private readonly state: WebviewState;
-  private panel?: vscode.WebviewPanel;
-  private sidebarView?: vscode.WebviewView;
+  private chatView?: vscode.WebviewView;
   private pendingPreview?: DiffPreview;
   private lastPrompt?: string;
   private lastPlan?: PlanResult;
   private selectedModelOverride?: string;
   private requestSerial = 0;
+  private chatHistory: ChatHistoryEntry[];
+  private workspaceIndexCache: { index: WorkspaceIndex; timestamp: number } | null = null;
+  private readonly INDEX_CACHE_TTL_MS = 5 * 60 * 1000;
+  private lastUiUpdate = 0;
+  private readonly UI_UPDATE_THROTTLE_MS = 50;
+  private pendingUiSyncTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(extensionContext: vscode.ExtensionContext) {
     this.extensionContext = extensionContext;
 
     const restored = extensionContext.workspaceState.get<WebviewState | undefined>(SESSION_STATE_KEY);
+    this.chatHistory = extensionContext.workspaceState.get<ChatHistoryEntry[]>(CHAT_HISTORY_STATE_KEY) ?? [];
     this.state = {
       messages: restored?.messages ?? [],
       status: 'idle',
@@ -314,75 +417,65 @@ class KlyrExtensionController {
   }
 
   openChat(initialPrompt?: string, modeHint?: PlanMode): void {
-    if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.Beside);
-    } else {
-      this.panel = vscode.window.createWebviewPanel(
-        'klyr.chat',
-        'Klyr',
-        vscode.ViewColumn.Beside,
-        {
-          enableScripts: true,
-          retainContextWhenHidden: true,
-          localResourceRoots: [vscode.Uri.file(this.extensionContext.extensionPath)],
-        }
-      );
+    void this.revealChatPanel(initialPrompt, modeHint);
+  }
 
-      const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      
-      // Try to load React webview, fall back to simple HTML if not available
-      let html: string;
+  public launchChatFromSidebar(): void {
+    void (async () => {
+      await this.revealChatPanel();
       try {
-        const fs = require('fs');
-        const path = require('path');
-        const indexPath = this.extensionContext.asAbsolutePath('dist/webview/index.html');
-        
-        // Check if file exists
-        if (fs.existsSync(indexPath)) {
-          html = fs.readFileSync(indexPath, 'utf-8');
-          
-          // Fix paths for webview resources
-          const webviewUri = this.panel.webview.asWebviewUri(vscode.Uri.file(
-            this.extensionContext.asAbsolutePath('dist/webview')
-          ));
-          
-          // Replace relative paths with webview URIs (use global replace to catch all instances)
-          html = html.replace(/src="\/([^"]*)"/g, `src="${webviewUri}/$1"`);
-          html = html.replace(/href="\/([^"]*)"/g, `href="${webviewUri}/$1"`);
-          
-        } else {
-          throw new Error('dist/webview/index.html not found');
-        }
-      } catch (e) {
-        // Fallback to simple HTML if React build not available
-        this.logger.warn(`Failed to load React webview: ${e instanceof Error ? e.message : String(e)}, using fallback`);
-        html = buildWebviewHtml(nonce, this.state);
+        await vscode.commands.executeCommand('workbench.action.closeSidebar');
+      } catch (error) {
+        this.logger.debug(
+          `Unable to close primary sidebar after launch: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
+    })();
+  }
 
-      this.panel.webview.html = html;
-      this.panel.webview.onDidReceiveMessage((message) => {
-        void this.handleWebviewMessage(message);
-      });
-      this.panel.onDidDispose(() => {
-        this.panel = undefined;
-        this.setStatus('idle');
-      });
+  public attachChatView(webviewView: vscode.WebviewView): void {
+    this.chatView = webviewView;
+
+    webviewView.onDidDispose(() => {
+      if (this.chatView === webviewView) {
+        this.chatView = undefined;
+      }
+    });
+  }
+
+  public invalidateIndexCache(): void {
+    this.workspaceIndexCache = null;
+  }
+
+  private async revealChatPanel(
+    initialPrompt?: string,
+    modeHint?: PlanMode
+  ): Promise<void> {
+    try {
+      await this.ensureChatPanelOnRightSide();
+      await vscode.commands.executeCommand('workbench.action.openView', 'klyr.chatView', true);
+      await vscode.commands.executeCommand('workbench.action.focusPanel');
+    } catch (error) {
+      this.logger.warn(
+        `Failed to reveal right-side Klyr chat view: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
 
     this.syncWebview();
 
     if (initialPrompt) {
-      void this.submitPrompt(initialPrompt, modeHint ?? 'edit');
+      await this.submitPrompt(initialPrompt, modeHint ?? 'edit');
     }
   }
 
-  public attachSidebarView(webviewView: vscode.WebviewView): void {
-    this.sidebarView = webviewView;
-    webviewView.onDidDispose(() => {
-      if (this.sidebarView === webviewView) {
-        this.sidebarView = undefined;
-      }
-    });
+  private async ensureChatPanelOnRightSide(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand('workbench.action.positionPanelRight');
+    } catch (error) {
+      this.logger.debug(
+        `Unable to move the panel to the right: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   async runCurrentFileAction(action: string): Promise<void> {
@@ -434,7 +527,9 @@ class KlyrExtensionController {
         return new vscode.InlineCompletionList([]);
       }
 
-      const engine = new InMemoryContextEngine(new NaiveEmbeddingProvider());
+      const engine = new InMemoryContextEngine(
+        new OllamaEmbeddingProvider(runtime.config.ollama.baseUrl)
+      );
       await engine.index(runtime.documents);
       const matches = await engine.query({
         query: [document.uri.fsPath, prefix.slice(-400), suffix.slice(0, 160)].join('\n'),
@@ -499,17 +594,32 @@ class KlyrExtensionController {
     }
 
     if (typedMessage.type === 'chat:submit') {
-      const prompt = String(typedMessage.payload ?? '').trim();
+      const payload = typedMessage.payload;
+      const prompt =
+        typeof payload === 'string'
+          ? payload.trim()
+          : payload && typeof payload === 'object' && 'prompt' in payload
+            ? String((payload as { prompt?: unknown }).prompt ?? '').trim()
+            : '';
       if (!prompt) {
         return;
       }
 
-      await this.submitPrompt(prompt, 'chat');
+      const rawMode =
+        payload && typeof payload === 'object' && 'modeHint' in payload
+          ? String((payload as { modeHint?: unknown }).modeHint ?? '')
+          : 'chat';
+      const modeHint: PlanMode = rawMode === 'edit' || rawMode === 'inline' ? rawMode : 'chat';
+      await this.submitPrompt(prompt, modeHint);
     }
 
     if (typedMessage.type === 'diff:decision') {
       const decision = String(typedMessage.payload ?? 'reject');
       await this.handleDiffDecision(decision === 'accept' ? 'accept' : 'reject');
+    }
+
+    if (typedMessage.type === 'diff:viewInEditor') {
+      await this.viewDiffInEditor();
     }
 
     if (typedMessage.type === 'models:fetch') {
@@ -539,6 +649,115 @@ class KlyrExtensionController {
     if (typedMessage.type === 'chat:stop') {
       await this.stopActiveRequest();
     }
+
+    if (typedMessage.type === 'chat:history') {
+      await this.openChatHistory();
+    }
+  }
+
+  private async openChatHistory(): Promise<void> {
+    if (this.chatHistory.length === 0) {
+      vscode.window.showInformationMessage('No chat history yet.');
+      return;
+    }
+
+    const action = await vscode.window.showQuickPick(
+      [
+        { label: 'Restore a chat', value: 'restore' as const },
+        { label: 'Delete one history entry', value: 'deleteOne' as const },
+        { label: 'Clear all history', value: 'clearAll' as const },
+      ],
+      {
+        placeHolder: 'History actions',
+      }
+    );
+
+    if (!action) {
+      return;
+    }
+
+    if (action.value === 'clearAll') {
+      const confirmed = await vscode.window.showWarningMessage(
+        'Clear all saved chat history?',
+        { modal: true },
+        'Clear All'
+      );
+      if (confirmed !== 'Clear All') {
+        return;
+      }
+
+      this.chatHistory = [];
+      await this.extensionContext.workspaceState.update(CHAT_HISTORY_STATE_KEY, this.chatHistory);
+      vscode.window.showInformationMessage('All chat history cleared.');
+      return;
+    }
+
+    const items = this.chatHistory.map((entry) => {
+      const firstUserMessage = entry.messages.find((message) => message.role === 'user');
+      const label = firstUserMessage?.content?.slice(0, 70) || 'Untitled chat';
+      return {
+        label,
+        description: `${entry.messages.length} messages`,
+        detail: new Date(entry.createdAt).toLocaleString(),
+        entry,
+      };
+    });
+
+    if (action.value === 'deleteOne') {
+      const toDelete = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Choose a chat history entry to delete',
+        matchOnDescription: true,
+        matchOnDetail: true,
+      });
+
+      if (!toDelete) {
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete history entry: "${toDelete.label}"?`,
+        { modal: true },
+        'Delete'
+      );
+      if (confirmed !== 'Delete') {
+        return;
+      }
+
+      this.chatHistory = this.chatHistory.filter((entry) => entry.id !== toDelete.entry.id);
+      await this.extensionContext.workspaceState.update(CHAT_HISTORY_STATE_KEY, this.chatHistory);
+      vscode.window.showInformationMessage('History entry deleted.');
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Restore a previous chat',
+      matchOnDescription: true,
+      matchOnDetail: true,
+    });
+
+    if (!picked) {
+      return;
+    }
+
+    this.state.messages = picked.entry.messages.map((message) => ({ ...message }));
+    this.setStatus('idle', 'History restored.');
+    await this.persistState();
+    this.syncWebview();
+  }
+
+  private async archiveCurrentChatIfNeeded(): Promise<void> {
+    if (this.state.messages.length === 0) {
+      return;
+    }
+
+    const snapshot: ChatHistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      createdAt: Date.now(),
+      messages: this.state.messages.map((message) => ({ ...message })),
+    };
+
+    this.chatHistory = [snapshot, ...this.chatHistory].slice(0, 25);
+    await this.extensionContext.workspaceState.update(CHAT_HISTORY_STATE_KEY, this.chatHistory);
   }
 
   private async stopActiveRequest(): Promise<void> {
@@ -602,6 +821,43 @@ class KlyrExtensionController {
     this.setStatus('planning', 'Preparing plan from current workspace context.');
     this.syncWebview();
 
+    let documentsForPipeline = runtime.documents;
+    try {
+      this.setStatus('retrieving', 'Building optimized context from workspace and conversation.');
+      this.syncWebview();
+      const conversationHistory = this.state.messages
+        .filter(
+          (message): message is UiChatMessage & { role: 'user' | 'assistant' } =>
+            message.role === 'user' || message.role === 'assistant'
+        )
+        .map((message) => ({ role: message.role, content: message.content }));
+
+      const contextResponse = await this.contextOrchestrator.orchestrate({
+        query: prompt,
+        workspacePath: runtime.workspaceRoot,
+        currentFilePath: runtime.activeFilePath,
+        conversationHistory,
+        includeMemory: true,
+      });
+
+      if (contextResponse.formattedContext.trim()) {
+        const orchestratedDocument: ContextDocument = {
+          id: `klyr-orchestrated-${Date.now()}`,
+          uri: `${runtime.workspaceRoot.replace(/\\/g, '/')}/.klyr/context`,
+          title: 'klyr-orchestrated-context',
+          content: contextResponse.formattedContext,
+          updatedAt: Date.now(),
+          source: 'memory',
+          tags: ['orchestrated', 'context'],
+        };
+        documentsForPipeline = [orchestratedDocument, ...runtime.documents];
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Context orchestration failed, using baseline retrieval: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
     const pipeline = this.createPipeline();
     let streamingMessageId: string | undefined;
     const result = await pipeline.execute(
@@ -614,13 +870,13 @@ class KlyrExtensionController {
         workspaceSummary: runtime.workspaceSummary,
         dependencyAllowlist: runtime.dependencyAllowlist,
         openFiles: runtime.openFiles,
-        documents: runtime.documents,
+        documents: documentsForPipeline,
         logger: this.logger,
       },
       {
         maxAttempts: runtime.config.execution.maxAttempts,
         retrievalMaxResults: runtime.config.context.retrievalMaxResults,
-        allowNewFiles: allowNewFilesForPrompt(prompt),
+        allowNewFiles: true,
       },
       {
         onStage: async (stage, detail) => {
@@ -676,17 +932,26 @@ class KlyrExtensionController {
       this.state.diffPreview = result.preview.changes.map<UiDiffChange>((change) => ({
         path: change.path,
         diff: change.diff,
+        diffHtml: change.diffHtml,
         summary: change.summary,
         operation: change.operation,
+        additions: change.detailedDiff?.additions ?? 0,
+        deletions: change.detailedDiff?.deletions ?? 0,
       }));
+      this.state.totalAdditions = result.preview.totalAdditions;
+      this.state.totalDeletions = result.preview.totalDeletions;
 
       const planSummary = result.plan ? `Plan: ${result.plan.summary}` : 'Plan ready.';
       const rationale = result.preview.rationale || result.preview.summary;
+      const changesSummary = `Files: ${result.preview.changes.length} change(s) | +${result.preview.totalAdditions} -${result.preview.totalDeletions}`;
+      
       this.appendMessage(
         'assistant',
-        `${planSummary}\n\nReasoning: ${rationale}\n\nReview the diff preview before applying changes.`
+        `${planSummary}\n\nReasoning: ${rationale}\n\n${changesSummary}\n\nReview the diff preview in the sidebar. Click "Apply Changes" to accept or "Reject Changes" to cancel.`
       );
-      this.setStatus('review', 'Validated diff ready for approval.');
+      
+      // ALWAYS show diff for review - never auto-apply
+      this.setStatus('review', 'Review changes in sidebar, then apply or reject.');
       await this.persistState();
       this.syncWebview();
       return;
@@ -697,8 +962,74 @@ class KlyrExtensionController {
     this.syncWebview();
   }
 
+  public async viewDiffInEditor(): Promise<void> {
+    if (!this.pendingPreview) {
+      vscode.window.showInformationMessage('No diff available to view.');
+      return;
+    }
+    
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage('No workspace open.');
+      return;
+    }
+    
+    await this.openDiffInEditor(this.pendingPreview, workspaceRoot);
+  }
+
+  private async openDiffInEditor(preview: DiffPreview, workspaceRoot: string): Promise<void> {
+    // Open VS Code's built-in diff viewer for each change
+    const tempDir = path.join(workspaceRoot, '.klyr-temp');
+    
+    try {
+      await fs.mkdir(tempDir, { recursive: true });
+    } catch {
+      // Directory might already exist
+    }
+
+    for (const change of preview.changes) {
+      if (change.operation === 'delete') {
+        // For deletions, just show the file that will be deleted
+        const filePath = vscode.Uri.file(path.join(workspaceRoot, change.path));
+        await vscode.window.showTextDocument(filePath, { viewColumn: vscode.ViewColumn.One });
+        continue;
+      }
+
+      // Create original file in temp (if it exists)
+      if (change.originalContent && change.operation === 'update') {
+        const originalPath = path.join(tempDir, `${path.basename(change.path)}.original`);
+        await fs.writeFile(originalPath, change.originalContent, 'utf-8');
+      }
+
+      // Create proposed file in temp
+      const proposedPath = path.join(tempDir, path.basename(change.path));
+      await fs.writeFile(proposedPath, change.proposedContent, 'utf-8');
+
+      // Open VS Code diff viewer
+      const originalUri = vscode.Uri.file(
+        change.originalContent && change.operation === 'update' 
+          ? path.join(tempDir, `${path.basename(change.path)}.original`)
+          : proposedPath
+      );
+      const modifiedUri = vscode.Uri.file(proposedPath);
+
+      const doc = await vscode.window.showTextDocument(
+        change.originalContent && change.operation === 'update' ? originalUri : modifiedUri,
+        { viewColumn: vscode.ViewColumn.One }
+      );
+
+      // If it's an update (has original), open diff
+      if (change.originalContent && change.operation === 'update') {
+        await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, 
+          `${change.path} - Klyr Changes`,
+          { viewColumn: vscode.ViewColumn.Two }
+        );
+      }
+    }
+  }
+
   private async handleDiffDecision(decision: 'accept' | 'reject'): Promise<void> {
-    const preview = this.pendingPreview;
+    let preview = this.pendingPreview;
     this.pendingPreview = undefined;
     this.state.diffPreview = [];
 
@@ -710,6 +1041,10 @@ class KlyrExtensionController {
 
     if (decision === 'reject') {
       this.appendMessage('assistant', 'Diff rejected. No files were modified.');
+      const rejectWorkspaceRoot = getWorkspaceRoot();
+      if (rejectWorkspaceRoot) {
+        await this.cleanupBackups(rejectWorkspaceRoot);
+      }
       await this.recordDecisionMemory('rejected', []);
       this.setStatus('idle', 'Draft rejected.');
       await this.persistState();
@@ -725,24 +1060,101 @@ class KlyrExtensionController {
       return;
     }
 
+    const safePreview = this.buildSafeAdditivePreview(preview);
+    if (safePreview) {
+      preview = safePreview;
+      this.appendMessage(
+        'assistant',
+        'Safety rewrite: converted destructive draft into add-only insertion to preserve existing file content.'
+      );
+      this.syncWebview();
+    }
+
+    if (preview.changes.length === 0) {
+      const recoveredPreview = await this.buildNoopAdditiveRecoveryPreview(workspaceRoot, preview);
+      if (recoveredPreview) {
+        preview = recoveredPreview;
+        this.appendMessage(
+          'assistant',
+          'Recovery path: generated a deterministic add-only patch from your prompt because the model draft resolved to a no-op.'
+        );
+        this.syncWebview();
+      } else {
+        // No changes and couldn't recover - show error message
+        const errorMessage = preview.rationale 
+          ? `The AI did not generate code changes: ${preview.rationale.slice(0, 200)}`
+          : 'The AI did not generate any code changes. Please try being more specific about what you want changed.';
+        
+        this.appendMessage('assistant', errorMessage);
+        this.appendMessage('assistant', 'Tips: \n• Be specific about what to change\n• Mention the exact file name\n• Describe the exact change (e.g., "add error handling to line 5")');
+        this.setStatus('idle', 'No changes generated');
+        await this.persistState();
+        this.syncWebview();
+        return;
+      }
+    }
+
     this.setStatus('executing', 'Applying validated changes to the workspace.');
     this.syncWebview();
 
-    const executor = new FileSystemExecutor();
-    const applyResult = await executor.apply(preview, 'accept', workspaceRoot);
+    const backupPaths: string[] = [];
+    for (const change of preview.changes) {
+      if (change.operation !== 'update') {
+        continue;
+      }
+      const filePath = path.join(workspaceRoot, change.path);
+      const backupPath = await this.backupFile(filePath);
+      if (backupPath) {
+        backupPaths.push(backupPath);
+      }
+    }
+
+    const applyResult: ApplyResult = {
+      applied: 0,
+      rejected: 0,
+      changedPaths: [],
+      errors: [],
+    };
+
+    for (let index = 0; index < preview.changes.length; index += 1) {
+      const change = preview.changes[index];
+      this.setStatus(
+        'executing',
+        `Applying ${change.operation}: ${change.path} (${index + 1}/${preview.changes.length})`
+      );
+      this.syncWebview();
+
+      const singleResult = await this.applySingleChange(change, workspaceRoot);
+      applyResult.applied += singleResult.applied;
+      applyResult.rejected += singleResult.rejected;
+      applyResult.changedPaths.push(...singleResult.changedPaths);
+      applyResult.errors.push(...singleResult.errors);
+    }
+
+    this.invalidateIndexCache();
 
     if (applyResult.errors.length > 0) {
       const details = applyResult.errors.map((error) => `${error.path}: ${error.message}`).join('\n');
+      const restoreInfo =
+        backupPaths.length > 0 ? `\n\nBackups saved at: ${backupPaths.join(', ')}` : '';
       this.appendMessage(
         'assistant',
-        `Applied ${applyResult.applied} file(s) with ${applyResult.errors.length} error(s):\n${details}`
+        `Applied ${applyResult.applied} file(s) with ${applyResult.errors.length} error(s):\n${details}${restoreInfo}`
       );
       await this.recordDecisionMemory('error', applyResult.changedPaths);
+    } else if (applyResult.applied === 0) {
+      this.appendMessage(
+        'assistant',
+        'No file changes were applied. The requested content may already exist, or the generated draft resolved to a no-op.'
+      );
+      await this.cleanupBackups(workspaceRoot);
+      await this.recordDecisionMemory('success', []);
     } else {
       this.appendMessage(
         'assistant',
         `Applied ${applyResult.applied} change(s) successfully.\n\nFiles: ${applyResult.changedPaths.join(', ')}`
       );
+      await this.cleanupBackups(workspaceRoot);
       await this.recordDecisionMemory('success', applyResult.changedPaths);
     }
 
@@ -778,12 +1190,22 @@ class KlyrExtensionController {
   }
 
   private createPipeline(): Pipeline {
+    const config = this.getConfig();
+    const ollamaClient = new HttpOllamaClient({
+      baseUrl: config.ollama.baseUrl,
+      timeoutMs: config.ollama.timeoutMs,
+      maxRetries: config.ollama.maxRetries,
+    });
+    
+    // Use LLM-powered planner for better intent classification
+    const planner = new LLMPoweredPlanner(ollamaClient, config.ollama.model);
+    
     return new Pipeline(
-      new BasicPlanner(),
-      this.createCoder(this.getConfig()),
+      planner,
+      this.createCoder(config),
       new BasicValidator(),
       new FileSystemExecutor(),
-      new InMemoryContextEngine(new NaiveEmbeddingProvider()),
+      new InMemoryContextEngine(new OllamaEmbeddingProvider(config.ollama.baseUrl)),
       this.memory,
       this.logger
     );
@@ -804,7 +1226,19 @@ class KlyrExtensionController {
     }
 
     const config = this.getConfig();
-    const workspaceIndex = await indexWorkspace(workspaceRoot);
+    let workspaceIndex: WorkspaceIndex;
+    if (
+      this.workspaceIndexCache &&
+      Date.now() - this.workspaceIndexCache.timestamp < this.INDEX_CACHE_TTL_MS
+    ) {
+      workspaceIndex = this.workspaceIndexCache.index;
+    } else {
+      workspaceIndex = await indexWorkspace(workspaceRoot);
+      this.workspaceIndexCache = {
+        index: workspaceIndex,
+        timestamp: Date.now(),
+      };
+    }
     const activeEditor = vscode.window.activeTextEditor;
     const activeFilePath =
       activeEditor?.document.uri.scheme === 'file' ? activeEditor.document.uri.fsPath : undefined;
@@ -948,6 +1382,26 @@ class KlyrExtensionController {
   }
 
   private syncWebview(): void {
+    const now = Date.now();
+    const elapsed = now - this.lastUiUpdate;
+
+    if (elapsed < this.UI_UPDATE_THROTTLE_MS) {
+      if (this.pendingUiSyncTimer) {
+        return;
+      }
+
+      this.pendingUiSyncTimer = setTimeout(() => {
+        this.pendingUiSyncTimer = undefined;
+        this.lastUiUpdate = Date.now();
+        this.postToWebviews({
+          type: 'state:update',
+          payload: this.state,
+        });
+      }, this.UI_UPDATE_THROTTLE_MS - elapsed);
+      return;
+    }
+
+    this.lastUiUpdate = now;
     this.postToWebviews({
       type: 'state:update',
       payload: this.state,
@@ -955,16 +1409,12 @@ class KlyrExtensionController {
   }
 
   private hasAttachedWebviews(): boolean {
-    return Boolean(this.panel || this.sidebarView);
+    return Boolean(this.chatView);
   }
 
   private postToWebviews(message: unknown): void {
-    if (this.panel) {
-      void this.panel.webview.postMessage(message);
-    }
-
-    if (this.sidebarView) {
-      void this.sidebarView.webview.postMessage(message);
+    if (this.chatView) {
+      void this.chatView.webview.postMessage(message);
     }
   }
 
@@ -975,6 +1425,7 @@ class KlyrExtensionController {
   }
 
   private async clearChatState(): Promise<void> {
+    await this.archiveCurrentChatIfNeeded();
     this.pendingPreview = undefined;
     this.lastPrompt = undefined;
     this.lastPlan = undefined;
@@ -985,6 +1436,328 @@ class KlyrExtensionController {
     this.setStatus('idle');
     await this.persistState();
     this.syncWebview();
+  }
+
+  private async applySingleChange(
+    change: DiffPreview['changes'][number],
+    workspaceRoot: string
+  ): Promise<ApplyResult> {
+    const executor = new FileSystemExecutor();
+    return executor.apply(
+      {
+        summary: `Apply ${change.path}`,
+        rationale: 'single change apply',
+        changes: [change],
+        totalAdditions: 0,
+        totalDeletions: 0,
+      },
+      'accept',
+      workspaceRoot
+    );
+  }
+
+  private async backupFile(filePath: string): Promise<string | null> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const backupPath = `${filePath}.klyr.backup.${Date.now()}`;
+      await fs.writeFile(backupPath, content, 'utf-8');
+      return backupPath;
+    } catch {
+      return null;
+    }
+  }
+
+  private async cleanupBackups(workspaceRoot: string): Promise<void> {
+    try {
+      const files = await fs.readdir(workspaceRoot);
+      for (const file of files) {
+        if (!file.includes('.klyr.backup.')) {
+          continue;
+        }
+
+        const parts = file.split('.klyr.backup.');
+        if (parts.length < 2) {
+          continue;
+        }
+
+        const timestamp = Number.parseInt(parts[1], 10);
+        if (!Number.isFinite(timestamp)) {
+          continue;
+        }
+
+        if (Date.now() - timestamp > 24 * 60 * 60 * 1000) {
+          await fs.unlink(path.join(workspaceRoot, file));
+        }
+      }
+    } catch {
+      // Ignore cleanup errors.
+    }
+  }
+
+  private shouldAutoApplyPreview(preview: DiffPreview): boolean {
+    const prompt = (this.lastPrompt ?? '').toLowerCase();
+    if (!prompt) {
+      return true;
+    }
+
+    const addIntent = this.isAddOnlyPrompt(prompt);
+    const destructiveIntent = /\b(delete|remove|replace|rewrite|refactor|cleanup|format|restructure)\b/.test(prompt);
+
+    if (!addIntent || destructiveIntent) {
+      return true;
+    }
+
+    return !this.previewHasDeletions(preview);
+  }
+
+  private isAddOnlyPrompt(prompt: string): boolean {
+    const normalized = prompt.toLowerCase();
+    const addIntent = /\b(add|append|insert|include|put)\b/.test(normalized);
+    const hasNegatedDestructive =
+      /\b(don't|dont|do not|never)\s+(delete|remove)\b/.test(normalized) ||
+      /\bwithout\s+(deleting|removing)\b/.test(normalized);
+    const destructiveIntent =
+      /\b(delete|remove|replace|rewrite|refactor|cleanup|format|restructure)\b/.test(normalized) &&
+      !hasNegatedDestructive;
+    return addIntent && !destructiveIntent;
+  }
+
+  private buildSafeAdditivePreview(preview: DiffPreview): DiffPreview | undefined {
+    const prompt = (this.lastPrompt ?? '').trim();
+    if (!prompt || !this.isAddOnlyPrompt(prompt) || !this.previewHasDeletions(preview)) {
+      return undefined;
+    }
+
+    const requestedLiteral = this.extractRequestedLiteral(prompt);
+    if (!requestedLiteral) {
+      return undefined;
+    }
+
+    const normalizedLiteral = requestedLiteral.trim();
+    if (!normalizedLiteral) {
+      return undefined;
+    }
+
+    const targetPaths = this.extractMentionedPaths(prompt);
+    const insertionMode = this.extractInsertionMode(prompt);
+
+    const safeChanges = preview.changes.reduce<DiffPreview['changes']>((accumulator, change) => {
+      if (targetPaths.length > 0) {
+        const normalizedPath = change.path.replace(/\\/g, '/').toLowerCase();
+        const matchesTarget = targetPaths.some((targetPath) => normalizedPath.endsWith(targetPath));
+        if (!matchesTarget) {
+          return accumulator;
+        }
+      }
+
+      if (change.operation === 'delete') {
+        return accumulator;
+      }
+
+      const baseContent = change.originalContent ?? '';
+      if (this.isLiteralAlreadyPresent(baseContent, normalizedLiteral, insertionMode)) {
+        return accumulator;
+      }
+
+      const proposedContent = this.insertLiteral(baseContent, normalizedLiteral, insertionMode);
+      accumulator.push({
+        ...change,
+        operation: baseContent ? 'update' : 'create',
+        proposedContent,
+      });
+      return accumulator;
+    }, []);
+
+    if (safeChanges.length === 0) {
+      return undefined;
+    }
+
+    return {
+      ...preview,
+      rationale: `${preview.rationale} | Safe additive fallback was used.`,
+      changes: safeChanges,
+    };
+  }
+
+  private async buildNoopAdditiveRecoveryPreview(
+    workspaceRoot: string,
+    originalPreview: DiffPreview
+  ): Promise<DiffPreview | undefined> {
+    const prompt = (this.lastPrompt ?? '').trim();
+    if (!prompt || !this.isAddOnlyPrompt(prompt)) {
+      return undefined;
+    }
+
+    const requestedLiteral = this.extractRequestedLiteral(prompt)?.trim();
+    if (!requestedLiteral) {
+      return undefined;
+    }
+
+    const insertionMode = this.extractInsertionMode(prompt);
+    const targetPaths = this.extractMentionedPaths(prompt);
+    if (targetPaths.length === 0) {
+      return undefined;
+    }
+
+    const recoveryChanges: Array<{
+      path: string;
+      summary: string;
+      diff: string;
+      proposedContent: string;
+      operation: 'create' | 'update' | 'delete';
+    }> = [];
+
+    for (const targetPath of targetPaths) {
+      const absolutePath = path.resolve(workspaceRoot, targetPath);
+      if (!this.isWithinWorkspace(absolutePath, workspaceRoot)) {
+        continue;
+      }
+
+      let originalContent = '';
+      try {
+        originalContent = await fs.readFile(absolutePath, 'utf-8');
+      } catch {
+        originalContent = '';
+      }
+
+      if (this.isLiteralAlreadyPresent(originalContent, requestedLiteral, insertionMode)) {
+        continue;
+      }
+
+      const proposedContent = this.insertLiteral(originalContent, requestedLiteral, insertionMode);
+      recoveryChanges.push({
+        path: targetPath,
+        summary: `Add ${requestedLiteral} to ${insertionMode === 'top' ? 'top' : 'file'}`,
+        diff: '',
+        proposedContent,
+        operation: originalContent ? 'update' : 'create',
+      });
+    }
+
+    if (recoveryChanges.length === 0) {
+      return undefined;
+    }
+
+    const executor = new FileSystemExecutor();
+    return executor.preview(
+      {
+        summary: originalPreview.summary || 'Recovered add-only patch',
+        rationale: `${originalPreview.rationale} | No-op recovery used prompt-derived insertion.`,
+        changes: recoveryChanges,
+      },
+      workspaceRoot
+    );
+  }
+
+  private extractInsertionMode(prompt: string): 'top' | 'bottom' | 'any' {
+    const normalized = prompt.toLowerCase();
+    if (/\b(top|beginning|start|first line|very top)\b/.test(normalized)) {
+      return 'top';
+    }
+    if (/\b(bottom|end|last line|append)\b/.test(normalized)) {
+      return 'bottom';
+    }
+    return 'any';
+  }
+
+  private isLiteralAlreadyPresent(
+    baseContent: string,
+    literal: string,
+    mode: 'top' | 'bottom' | 'any'
+  ): boolean {
+    if (!baseContent || !literal) {
+      return false;
+    }
+
+    const normalizedLiteral = literal.trim();
+    if (!normalizedLiteral) {
+      return false;
+    }
+
+    const lines = baseContent.replace(/\r\n/g, '\n').split('\n');
+    if (mode === 'top') {
+      return lines.slice(0, Math.min(lines.length, 6)).some((line) => line.trim() === normalizedLiteral);
+    }
+
+    if (mode === 'bottom') {
+      return lines
+        .slice(Math.max(0, lines.length - 6))
+        .some((line) => line.trim() === normalizedLiteral);
+    }
+
+    return baseContent.includes(normalizedLiteral);
+  }
+
+  private insertLiteral(baseContent: string, literal: string, mode: 'top' | 'bottom' | 'any'): string {
+    const normalizedBase = baseContent.replace(/\r\n/g, '\n');
+    const normalizedLiteral = literal.trim();
+
+    if (!normalizedBase) {
+      return `${normalizedLiteral}\n`;
+    }
+
+    if (mode === 'top') {
+      return `${normalizedLiteral}\n${normalizedBase}`;
+    }
+
+    const separator = normalizedBase.endsWith('\n') ? '' : '\n';
+    return `${normalizedBase}${separator}${normalizedLiteral}\n`;
+  }
+
+  private isWithinWorkspace(candidatePath: string, workspaceRoot: string): boolean {
+    const normalizedRoot = path.resolve(workspaceRoot);
+    const normalizedCandidate = path.resolve(candidatePath);
+
+    return (
+      normalizedCandidate === normalizedRoot ||
+      normalizedCandidate.startsWith(`${normalizedRoot}${path.sep}`)
+    );
+  }
+
+  private extractMentionedPaths(prompt: string): string[] {
+    const matches = prompt.match(/(?:[A-Za-z]:[\\/])?[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_-]+/g) ?? [];
+    const normalized = matches
+      .map((match) => match.replace(/^["'`]|["'`]$/g, '').replace(/\\/g, '/').toLowerCase())
+      .map((value) => value.replace(/^\.[/]/, '').replace(/^[/]/, ''))
+      .filter((value) => value.length > 0);
+
+    return [...new Set(normalized)];
+  }
+
+  private extractRequestedLiteral(prompt: string): string | undefined {
+    const quoted = prompt.match(/["'`](.+?)["'`]/);
+    if (quoted?.[1]) {
+      return quoted[1].trim();
+    }
+
+    const nameMatch = prompt.match(/\bname(?:\s+is)?\s+([A-Za-z][A-Za-z0-9_-]{1,80})\b/i);
+    if (nameMatch?.[1]) {
+      return nameMatch[1].trim();
+    }
+
+    const addMatch = prompt.match(/\badd\s+([A-Za-z0-9 _.-]{1,120})\s+to\b/i);
+    if (addMatch?.[1]) {
+      return addMatch[1].trim();
+    }
+
+    return undefined;
+  }
+
+  private previewHasDeletions(preview: DiffPreview): boolean {
+    for (const change of preview.changes) {
+      if (change.operation === 'delete') {
+        return true;
+      }
+
+      const lines = change.diff.split(/\r?\n/);
+      for (const line of lines) {
+        if (line.startsWith('-') && !line.startsWith('---')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private async persistState(): Promise<void> {

@@ -268,6 +268,8 @@ suite('Executor', () => {
           operation: 'create' as const,
         },
       ],
+      totalAdditions: 0,
+      totalDeletions: 0,
     };
 
     const result = await executor.apply(preview, 'accept', root);

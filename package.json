@@ -9,6 +9,11 @@
   "categories": [
     "Other"
   ],
+  "activationEvents": [
+    "onCommand:klyr.openChat",
+    "onView:klyr.chatLauncher",
+    "onView:klyr.chatView"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -32,14 +37,29 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "klyr-sidebar",
+          "id": "klyr-chat-launcher",
+          "title": "Klyr",
+          "icon": "media/klyr-icon.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "klyr-chat-panel",
           "title": "Klyr",
           "icon": "media/klyr-icon.svg"
         }
       ]
     },
     "views": {
-      "klyr-sidebar": [
+      "klyr-chat-launcher": [
+        {
+          "id": "klyr.chatLauncher",
+          "name": "Open Chat",
+          "type": "webview",
+          "when": "true"
+        }
+      ],
+      "klyr-chat-panel": [
         {
           "id": "klyr.chatView",
           "name": "Chat",

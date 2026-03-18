@@ -1,3 +1,4 @@
+import type { OllamaClient } from '../llm/ollamaClient';
 export type PlanMode = 'chat' | 'edit' | 'inline';
 export interface PlannerInput {
     prompt: string;
@@ -30,6 +31,24 @@ export interface PlanResult {
 }
 export interface Planner {
     plan(input: PlannerInput): Promise<PlanResult>;
+}
+export declare class LLMPoweredPlanner implements Planner {
+    private readonly client;
+    private readonly model;
+    constructor(client: OllamaClient, model: string);
+    plan(input: PlannerInput): Promise<PlanResult>;
+    private classifyIntent;
+    private parseClassificationResponse;
+    private fallbackClassification;
+    private normalizeIntent;
+    private determineMode;
+    private collectTargetHints;
+    private getClarification;
+    private describeGoal;
+    private buildSummary;
+    private buildGuardrails;
+    private planSteps;
+    private includesAny;
 }
 export declare class BasicPlanner implements Planner {
     plan(input: PlannerInput): Promise<PlanResult>;

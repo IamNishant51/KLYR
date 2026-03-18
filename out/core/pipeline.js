@@ -1,6 +1,40 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Pipeline = void 0;
+const path = __importStar(require("path"));
 const fixer_1 = require("../agent/fixer");
 const memory_1 = require("../context/memory");
 const retriever_1 = require("../context/retriever");
@@ -50,20 +84,35 @@ class Pipeline {
                     logs: this.logs,
                 };
             }
+            const planTargets = plan.targetHints.slice(0, 3).join(', ');
+            const planDetail = `Intent: ${plan.intent}. Mode: ${plan.mode}. ${planTargets ? `Targets: ${planTargets}.` : 'Using active workspace context.'}`;
+            await this.emitStage(callbacks, 'planning', planDetail);
             await this.emitStage(callbacks, 'retrieving', 'Gathering active editor, workspace, and memory context.');
-            await this.contextEngine.index(context.documents);
+            const indexPromise = this.contextEngine.index(context.documents);
+            const memoryMatchesPromise = this.memory.query(context.prompt, 4);
+            const recentMemoryPromise = this.memory.recent(4);
+            await indexPromise;
             const contextMatches = await this.contextEngine.query({
                 query: [context.prompt, plan.intent, context.activeFilePath ?? '', context.selection ?? ''].join('\n'),
                 maxResults: finalConfig.retrievalMaxResults,
             });
             const retrievedDocuments = (0, retriever_1.uniqueDocumentsByPath)(contextMatches.map((match) => match.document));
-            const memoryMatches = await this.memory.query(context.prompt, 4);
-            const recentMemory = await this.memory.recent(4);
+            const mentionedDocuments = this.findPromptMentionedDocuments(context.prompt, context.documents);
+            const finalDocuments = (0, retriever_1.uniqueDocumentsByPath)([...mentionedDocuments, ...retrievedDocuments]);
+            const [memoryMatches, recentMemory] = await Promise.all([
+                memoryMatchesPromise,
+                recentMemoryPromise,
+            ]);
             const memoryContext = (0, memory_1.formatMemoryForContext)([...memoryMatches, ...recentMemory].slice(0, 6));
-            const coderContext = this.buildCoderContext(context, retrievedDocuments, memoryContext);
-            const contextSummary = (0, retriever_1.summarizeContext)(retrievedDocuments);
+            const coderContext = this.buildCoderContext(context, finalDocuments, memoryContext);
+            const contextSummary = (0, retriever_1.summarizeContext)(finalDocuments);
+            const retrievedPreview = finalDocuments
+                .slice(0, 4)
+                .map((document) => this.toRelativePath(context.workspaceRoot, document.uri))
+                .join(', ');
+            await this.emitStage(callbacks, 'retrieving', `Retrieved ${finalDocuments.length} context file${finalDocuments.length === 1 ? '' : 's'}${retrievedPreview ? `: ${retrievedPreview}` : ''}`);
             if (plan.mode === 'chat') {
-                await this.emitStage(callbacks, 'thinking', 'Answering with retrieved workspace context.');
+                await this.emitStage(callbacks, 'thinking', `Composing answer from ${finalDocuments.length} retrieved file${finalDocuments.length === 1 ? '' : 's'} and recent memory.`);
                 const answer = await this.coder.answer(this.buildCoderInput(context.prompt, plan, coderContext), callbacks.onAnswerChunk);
                 await this.memory.add({
                     id: `${Date.now()}`,
@@ -80,12 +129,12 @@ class Pipeline {
                     mode: plan.mode,
                     answer,
                     plan,
-                    retrievedDocuments,
+                    retrievedDocuments: finalDocuments,
                     contextSummary,
                     logs: this.logs,
                 };
             }
-            await this.emitStage(callbacks, 'thinking', 'Generating deterministic output from verified context.');
+            await this.emitStage(callbacks, 'thinking', `Generating deterministic edits (${plan.steps.length} planned step${plan.steps.length === 1 ? '' : 's'}) from verified context.`);
             const fixerResult = await (0, fixer_1.runFixerLoop)({
                 coder: this.coder,
                 validator: this.validator,
@@ -103,7 +152,7 @@ class Pipeline {
                     mode: plan.mode,
                     error: 'Code generation failed.',
                     plan,
-                    retrievedDocuments,
+                    retrievedDocuments: finalDocuments,
                     contextSummary,
                     logs: this.logs,
                 };
@@ -129,12 +178,12 @@ class Pipeline {
                     plan,
                     validation,
                     error: fixerResult.errors.map((error) => error.message).join('\n'),
-                    retrievedDocuments,
+                    retrievedDocuments: finalDocuments,
                     contextSummary,
                     logs: this.logs,
                 };
             }
-            await this.emitStage(callbacks, 'validating', 'Validation passed. Preparing the diff preview.');
+            await this.emitStage(callbacks, 'validating', `Validation passed on attempt ${fixerResult.attempts}. Preparing diff preview.`);
             const preview = await this.executor.preview(fixerResult.draft, context.workspaceRoot);
             await this.emitStage(callbacks, 'review', 'Diff preview ready for user approval.');
             return {
@@ -144,7 +193,7 @@ class Pipeline {
                 preview,
                 plan,
                 validation: { ok: true, errors: [] },
-                retrievedDocuments,
+                retrievedDocuments: finalDocuments,
                 contextSummary,
                 logs: this.logs,
             };
@@ -202,6 +251,40 @@ class Pipeline {
                 .replace(/\\/g, '/');
         }
         return absoluteOrRelativePath.replace(/\\/g, '/');
+    }
+    findPromptMentionedDocuments(prompt, documents) {
+        const mentions = this.extractPathMentions(prompt);
+        if (mentions.length === 0) {
+            return [];
+        }
+        const mentionSet = new Set(mentions.map((item) => item.toLowerCase()));
+        const matches = documents.filter((document) => {
+            const relativePath = this.normalizePath(document.title || document.uri).toLowerCase();
+            const baseName = path.basename(relativePath);
+            for (const mention of mentionSet) {
+                const mentionBase = path.basename(mention);
+                if (relativePath.endsWith(mention) || baseName === mention || baseName === mentionBase) {
+                    return true;
+                }
+            }
+            return false;
+        });
+        return (0, retriever_1.uniqueDocumentsByPath)(matches).slice(0, 6);
+    }
+    extractPathMentions(prompt) {
+        const matches = prompt.match(/(?:[A-Za-z]:[\\/])?[A-Za-z0-9_./\\-]+\.[A-Za-z0-9_-]+/g) ?? [];
+        const uniqueMentions = new Set();
+        for (const match of matches) {
+            const normalized = this.normalizePath(match.replace(/^['"`]|['"`]$/g, ''));
+            if (!normalized) {
+                continue;
+            }
+            uniqueMentions.add(normalized);
+        }
+        return [...uniqueMentions];
+    }
+    normalizePath(value) {
+        return value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '');
     }
     async emitStage(callbacks, stage, detail) {
         await callbacks.onStage?.(stage, detail);

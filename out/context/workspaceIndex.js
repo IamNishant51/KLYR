@@ -41,16 +41,23 @@ const fs = __importStar(require("fs/promises"));
 const path = __importStar(require("path"));
 async function indexWorkspace(root) {
     const files = [];
-    const maxFiles = 500;
-    const maxDepth = 8;
+    const maxFiles = 1000; // Increased from 500
+    const maxDepth = 12; // Increased from 8
     const ignoreDirs = new Set([
         'node_modules',
-        'dist',
-        'build',
-        'out',
         '.git',
         '.vscode',
-        'coverage',
+        '.env',
+        '__pycache__',
+        '.pytest_cache',
+        'venv',
+        '.venv',
+        'env',
+        '.env.local',
+        '.nyc_output',
+        '.next',
+        '.nuxt',
+        'dist-ssr',
     ]);
     async function walk(dir, depth) {
         if (files.length >= maxFiles || depth > maxDepth) {
@@ -61,6 +68,10 @@ async function indexWorkspace(root) {
             for (const entry of entries) {
                 if (files.length >= maxFiles) {
                     break;
+                }
+                // Skip hidden files and ignored directories
+                if (entry.name.startsWith('.') && !entry.isDirectory()) {
+                    continue;
                 }
                 if (ignoreDirs.has(entry.name)) {
                     continue;
@@ -77,7 +88,8 @@ async function indexWorkspace(root) {
                 else {
                     try {
                         const stat = await fs.stat(fullPath);
-                        if (stat.size > 500 * 1024) {
+                        // Increase file size limit to 2MB to capture larger files like research.py
+                        if (stat.size > 2 * 1024 * 1024) {
                             continue;
                         }
                         files.push({
@@ -124,9 +136,9 @@ async function indexWorkspace(root) {
     };
 }
 async function readWorkspaceDocuments(index, options = {}) {
-    const maxFiles = options.maxFiles ?? 80;
-    const maxFileSize = options.maxFileSize ?? 200 * 1024;
-    const maxTotalSize = options.maxTotalSize ?? 500 * 1024;
+    const maxFiles = options.maxFiles ?? 200; // Increased from 80
+    const maxFileSize = options.maxFileSize ?? 1024 * 1024; // Increased from 200KB to 1MB
+    const maxTotalSize = options.maxTotalSize ?? 5 * 1024 * 1024; // Increased from 500KB to 5MB
     const priorityPaths = new Set((options.priorityPaths ?? []).map((item) => normalize(item)));
     const candidates = index.files
         .filter((file) => !file.isDirectory && isTextLikeFile(file.path))
@@ -203,6 +215,27 @@ function isTextLikeFile(filePath) {
         '.html',
         '.yml',
         '.yaml',
+        '.py',
+        '.java',
+        '.cpp',
+        '.c',
+        '.h',
+        '.hpp',
+        '.cs',
+        '.go',
+        '.rs',
+        '.rb',
+        '.php',
+        '.swift',
+        '.kt',
+        '.gradle',
+        '.xml',
+        '.sql',
+        '.sh',
+        '.bash',
+        '.env',
+        '.gitignore',
+        '.txt',
     ]).has(extension);
 }
 function buildPathTags(filePath) {

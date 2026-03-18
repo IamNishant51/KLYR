@@ -37,9 +37,33 @@ function SidePanel({
   activeTab,
   onTabChange,
 }: SidePanelProps) {
+  const contentLossFiles = diffPreview.filter((change) => {
+    if (change.operation !== 'update' || !change.diff) {
+      return false;
+    }
+
+    const lines = change.diff.split(/\r?\n/);
+    let removedLines = 0;
+    let addedLines = 0;
+    for (const line of lines) {
+      if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('@@')) {
+        continue;
+      }
+      if (line.startsWith('-')) {
+        removedLines += 1;
+      }
+      if (line.startsWith('+')) {
+        addedLines += 1;
+      }
+    }
+
+    return removedLines > addedLines + 5;
+  });
+
   if (compact) {
     return (
       <aside className="border-t border-white/5 bg-[#0f141a]/90 px-3 pb-3 pt-3 backdrop-blur-xl sm:px-4">
+        <ContentLossWarning files={contentLossFiles} />
         <div className="klyr-scrollbar -mx-1 mb-3 flex gap-2 overflow-x-auto px-1">
           {INSPECTOR_TABS.map((tab) => (
             <button
@@ -81,6 +105,7 @@ function SidePanel({
   return (
     <aside className="klyr-scrollbar overflow-y-auto border-l border-white/5 bg-[#0f141a]/78 p-4">
       <div className="space-y-4">
+        <ContentLossWarning files={contentLossFiles} />
         <SectionCard eyebrow="Inline Assist" title="Ghost Suggestion">
           <GhostSuggestionPanel
             ghostSuggestion={ghostSuggestion}
@@ -301,6 +326,29 @@ function Placeholder({ copy }: { copy: string }) {
     <div className="rounded-[24px] border border-dashed border-white/8 bg-white/[0.02] px-4 py-5 text-sm leading-7 text-slate-500">
       {copy}
     </div>
+  );
+}
+
+function ContentLossWarning({ files }: { files: DiffChange[] }) {
+  if (files.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-[24px] border border-red-700/70 bg-red-900/25 px-4 py-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
+      <div className="text-[10px] uppercase tracking-[0.28em] text-red-200">Warning</div>
+      <h3 className="mt-1 text-sm font-semibold text-red-100">Potential Content Loss Detected</h3>
+      <p className="mt-2 text-sm leading-7 text-red-100/90">
+        These update diffs remove substantially more lines than they add. Review carefully before applying.
+      </p>
+      <ul className="mt-3 space-y-1 text-xs text-red-100/90">
+        {files.map((file, index) => (
+          <li key={`${file.path}-${index}`} className="truncate font-mono">
+            {file.path}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

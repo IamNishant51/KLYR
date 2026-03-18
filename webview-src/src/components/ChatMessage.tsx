@@ -1,7 +1,9 @@
 import React, { memo, useEffect, useState } from 'react';
 import CodeBlock from './CodeBlock';
+import MarkdownText from './MarkdownText';
 import { parseMessageContent } from '../lib/chat';
 import type { ChatMessage as ChatMessageType } from '../types';
+import type { PanelLayoutMode } from '../App';
 
 interface DraftActions {
   onApply: () => void;
@@ -12,12 +14,16 @@ interface ChatMessageProps {
   message: ChatMessageType;
   streaming: boolean;
   draftActions?: DraftActions;
+  layoutMode: PanelLayoutMode;
 }
 
-function ChatMessage({ message, streaming, draftActions }: ChatMessageProps) {
+function ChatMessage({ message, streaming, draftActions, layoutMode }: ChatMessageProps) {
   const [visibleContent, setVisibleContent] = useState(message.content);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const compact = layoutMode !== 'regular';
+  const narrow = layoutMode === 'narrow';
+  const wrapperMaxWidth = narrow ? 'max-w-full' : compact ? 'max-w-[96%]' : 'max-w-[92%]';
 
   useEffect(() => {
     if (!streaming) {
@@ -62,12 +68,12 @@ function ChatMessage({ message, streaming, draftActions }: ChatMessageProps) {
       }`}
     >
       <div
-        className={`flex max-w-[92%] flex-col gap-2 ${
+        className={`flex w-full ${wrapperMaxWidth} flex-col gap-2 ${
           isSystem ? 'items-center' : isUser ? 'items-end' : 'items-start'
         }`}
       >
         {!isSystem && (
-          <div className="px-1 text-[11px] font-medium uppercase tracking-[0.22em]" style={{ color: 'var(--k-muted)' }}>
+          <div className={`px-1 font-medium uppercase tracking-[0.22em] ${narrow ? 'text-[10px]' : 'text-[11px]'}`} style={{ color: 'var(--k-muted)' }}>
             {isUser ? 'You' : 'Klyr'}
           </div>
         )}
@@ -75,10 +81,10 @@ function ChatMessage({ message, streaming, draftActions }: ChatMessageProps) {
         <div
           className={
             isSystem
-              ? 'rounded-full border px-4 py-2 text-xs'
+              ? 'w-fit max-w-full rounded-full border px-4 py-2 text-xs'
               : isUser
-              ? 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'
-              : 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'
+              ? `w-fit max-w-full ${narrow ? 'space-y-2.5 rounded-[20px] border px-3 py-2.5 text-[13px] leading-6' : compact ? 'space-y-2.5 rounded-[22px] border px-3.5 py-2.5 text-[13px] leading-6' : 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'}`
+              : `w-fit max-w-full ${narrow ? 'space-y-2.5 rounded-[20px] border px-3 py-2.5 text-[13px] leading-6' : compact ? 'space-y-2.5 rounded-[22px] border px-3.5 py-2.5 text-[13px] leading-6' : 'space-y-3 rounded-[24px] border px-4 py-3 text-sm leading-7'}`
           }
           style={
             isSystem
@@ -111,39 +117,69 @@ function ChatMessage({ message, streaming, draftActions }: ChatMessageProps) {
           ) : (
             segments.map((segment, segmentIndex) => {
               if (segment.type === 'code') {
+                const treatAsMarkdown = shouldRenderAsMarkdown(segment.language, segment.content);
+                if (treatAsMarkdown) {
+                  const showCursor = streaming && segmentIndex === segments.length - 1;
+                  return (
+                    <div
+                      key={`${message.id}-markdown-${segmentIndex}`}
+                      className={`${narrow ? 'space-y-2.5' : 'space-y-3'} ${!isUser ? `${narrow ? 'border-l pl-2.5' : 'border-l pl-3'}` : ''}`}
+                      style={!isUser ? { borderColor: 'color-mix(in srgb, var(--k-accent) 28%, transparent)' } : undefined}
+                    >
+                      <MarkdownText
+                        compact={compact}
+                        content={segment.content}
+                        showCursor={showCursor}
+                      />
+                    </div>
+                  );
+                }
+
                 return (
                   <CodeBlock
                     key={`${message.id}-code-${segmentIndex}`}
                     language={segment.language}
                     code={segment.content}
+                    compact={compact}
                     onApply={segmentIndex === 0 ? draftActions?.onApply : undefined}
                     onViewDiff={segmentIndex === 0 ? draftActions?.onOpenDiff : undefined}
                   />
                 );
               }
 
+              const showCursor =
+                streaming &&
+                segmentIndex === lastTextSegmentIndex;
+
               return (
                 <div
                   key={`${message.id}-text-${segmentIndex}`}
-                  className={`space-y-3 ${!isUser ? 'border-l pl-3' : ''}`}
+                  className={`${narrow ? 'space-y-2.5' : 'space-y-3'} ${!isUser ? `${narrow ? 'border-l pl-2.5' : 'border-l pl-3'}` : ''}`}
                   style={!isUser ? { borderColor: 'color-mix(in srgb, var(--k-accent) 28%, transparent)' } : undefined}
                 >
-                  {segment.content.split(/\n{2,}/).map((paragraph, paragraphIndex, paragraphs) => {
-                    const showCursor =
-                      streaming &&
-                      segmentIndex === lastTextSegmentIndex &&
-                      paragraphIndex === paragraphs.length - 1;
+                  {!isUser ? (
+                    <MarkdownText
+                      compact={compact}
+                      content={segment.content}
+                      showCursor={showCursor}
+                    />
+                  ) : (
+                    segment.content.split(/\n{2,}/).map((paragraph, paragraphIndex, paragraphs) => {
+                      const showParagraphCursor =
+                        showCursor &&
+                        paragraphIndex === paragraphs.length - 1;
 
-                    return (
-                      <p
-                        key={`${message.id}-paragraph-${segmentIndex}-${paragraphIndex}`}
-                        className="whitespace-pre-wrap break-words leading-7"
-                      >
-                        {paragraph}
-                        {showCursor ? <span className="klyr-cursor ml-1 align-middle" /> : null}
-                      </p>
-                    );
-                  })}
+                      return (
+                        <p
+                          key={`${message.id}-paragraph-${segmentIndex}-${paragraphIndex}`}
+                          className={`whitespace-pre-wrap break-words ${narrow ? 'leading-6' : 'leading-7'}`}
+                        >
+                          {paragraph}
+                          {showParagraphCursor ? <span className="klyr-cursor ml-1 align-middle" /> : null}
+                        </p>
+                      );
+                    })
+                  )}
                 </div>
               );
             })
@@ -168,6 +204,19 @@ function findLastTextSegmentIndex(segments: ReturnType<typeof parseMessageConten
   }
 
   return -1;
+}
+
+function shouldRenderAsMarkdown(language: string, content: string): boolean {
+  const normalizedLanguage = (language || '').trim().toLowerCase();
+  if (!['markdown', 'md', 'mdx'].includes(normalizedLanguage)) {
+    return false;
+  }
+
+  if (!content.trim()) {
+    return false;
+  }
+
+  return true;
 }
 
 export default memo(ChatMessage);

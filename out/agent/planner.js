@@ -23,6 +23,9 @@ class BasicPlanner {
     }
     extractIntent(prompt, hint) {
         const lower = `${hint ?? ''} ${prompt}`.toLowerCase();
+        const hasNegatedDelete = /\b(don't|dont|do not|never)\s+(delete|remove)\b/.test(lower) ||
+            /\bwithout\s+(deleting|removing)\b/.test(lower);
+        const hasDeleteTerms = this.includesAny(lower, ['delete', 'remove']);
         if (this.includesAny(lower, ['inline', 'complete', 'autocomplete', 'ghost text'])) {
             return 'inline';
         }
@@ -44,11 +47,11 @@ class BasicPlanner {
         if (this.includesAny(lower, ['enable', 'disable', 'feature', 'implement'])) {
             return 'feature';
         }
-        if (this.includesAny(lower, ['delete', 'remove'])) {
-            return 'delete';
-        }
         if (this.includesAny(lower, ['create', 'add', 'new file'])) {
             return 'create';
+        }
+        if (hasDeleteTerms && !hasNegatedDelete) {
+            return 'delete';
         }
         if (this.includesAny(lower, ['why', 'what', 'how', 'explain', 'summarize'])) {
             return 'explain';
