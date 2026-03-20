@@ -7,6 +7,7 @@ export interface OllamaClientOptions {
 export interface OllamaChatMessage {
     role: 'system' | 'user' | 'assistant';
     content: string;
+    images?: string[];
 }
 export interface OllamaChatRequest {
     model: string;

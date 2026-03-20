@@ -53,6 +53,8 @@ export declare class Pipeline {
     execute(context: PipelineContext, config?: Partial<PipelineConfig>, callbacks?: PipelineCallbacks): Promise<PipelineResult>;
     private buildCoderInput;
     private buildCoderContext;
+    private isWorkspaceDocument;
+    private trimText;
     private toRelativePath;
     private findPromptMentionedDocuments;
     private extractPathMentions;
@@ -60,4 +62,7 @@ export declare class Pipeline {
     private emitStage;
     private log;
     private detectUnexpectedOperations;
+    private detectScopedPathViolations;
+    private extractScopedFolder;
+    private extractTargetFolder;
 }

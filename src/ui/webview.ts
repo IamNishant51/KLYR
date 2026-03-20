@@ -1,5 +1,6 @@
 import { renderChatMessages } from './components/chatPanel';
 import { renderContextReferences, renderDiffPreview, renderPlanCard } from './components/diffPreview';
+import { getFileIcon } from './fileIcons';
 
 export type UiStatus =
   | 'idle'
@@ -8,7 +9,8 @@ export type UiStatus =
   | 'thinking'
   | 'validating'
   | 'review'
-  | 'executing';
+  | 'executing'
+  | 'fixing';
 
 export interface UiChatMessage {
   id: string;
@@ -72,9 +74,10 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Klyr</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.25/dist/codicon.css">
   <style>
     :root {
       color-scheme: dark;
@@ -119,29 +122,10 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       flex-shrink: 0;
     }
 
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
     .logo {
       font-weight: 700;
       font-size: 14px;
       letter-spacing: 0.05em;
-    }
-
-    .status-indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--success);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
     }
 
     .header-controls {
@@ -218,9 +202,35 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       }
     }
 
-    .message.user {
-      justify-content: flex-end;
-    }
+     .message.user {
+       justify-content: flex-end;
+     }
+     
+     .message.user .message-bubble {
+       background: rgba(30, 40, 50, 0.7);
+       border: 1px solid rgba(255, 255, 255, 0.1);
+       color: var(--text);
+       border-radius: 12px;
+       padding: 10px 14px;
+       max-width: 70%;
+       word-wrap: break-word;
+       white-space: pre-wrap;
+     }
+     
+     .message.assistant {
+       justify-content: flex-start;
+     }
+     
+     .message.assistant .message-bubble {
+       background: rgba(20, 25, 35, 0.7);
+       border: 1px solid rgba(255, 255, 255, 0.08);
+       color: var(--text);
+       border-radius: 12px;
+       padding: 10px 14px;
+       max-width: 70%;
+       word-wrap: break-word;
+       white-space: pre-wrap;
+     }
 
     .message-bubble {
       max-width: 70%;
@@ -230,16 +240,17 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       white-space: pre-wrap;
     }
 
-    .message.user .message-bubble {
-      background: linear-gradient(135deg, #0055aa, #0077dd);
-      color: var(--text);
-    }
-
-    .message.assistant .message-bubble {
-      background: rgba(23, 33, 49, 0.8);
-      border: 1px solid rgba(35, 49, 69, 0.8);
-      color: var(--text);
-    }
+     .message.user .message-bubble {
+       background: rgba(30, 40, 50, 0.7);
+       border: 1px solid rgba(255, 255, 255, 0.1);
+       color: var(--text);
+     }
+     
+     .message.assistant .message-bubble {
+       background: rgba(20, 25, 35, 0.7);
+       border: 1px solid rgba(255, 255, 255, 0.08);
+       color: var(--text);
+     }
 
     .empty-chat {
       display: flex;
@@ -296,17 +307,60 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       font-size: 11px;
     }
 
-    button {
-      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-      color: #0d1117;
-      border: 0;
-      border-radius: 8px;
-      padding: 8px 16px;
-      font-weight: 600;
-      font-size: 12px;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
+      button {
+        background: linear-gradient(135deg, #238636, #2ea043);
+        color: #0d1117;
+        border: 0;
+        border-radius: 6px;
+        padding: 10px 20px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      button:hover {
+        background: linear-gradient(135deg, #2ea043, #3fb950);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(46, 160, 67, 0.3);
+      }
+      
+      button:active {
+        transform: translateY(0);
+      }
+      
+      .btn-send {
+        background: white;
+        color: #238636;
+        border: 1px solid #238636;
+        border-radius: 6px;
+        padding: 10px 20px;
+        font-weight: 600;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      
+      .btn-send:hover {
+        background: rgba(35, 134, 54, 0.05);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(46, 160, 67, 0.2);
+      }
+      
+      .btn-send:active {
+        transform: translateY(0);
+      }
+      
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid rgba(35, 49, 69, 0.8);
+      }
+      
+      button.secondary:hover {
+        background: rgba(35, 49, 69, 0.2);
+        box-shadow: none;
+      }
 
     button:hover {
       transform: translateY(-1px);
@@ -415,7 +469,7 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       background: rgba(123, 223, 246, 0.5);
     }
 
-    /* Diff Preview Styles - Cursor/Copilot style */
+    /* Diff Preview Styles - Copilot-style */
     .diff-container {
       background: var(--panel);
       border-radius: 8px;
@@ -423,112 +477,192 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       margin-bottom: 12px;
     }
 
+    /* Summary header like Copilot */
+    .diff-summary-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 14px;
+      background: rgba(0, 0, 0, 0.3);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+    }
+
+    .diff-summary-changes {
+      font-weight: 600;
+      color: #e6edf3;
+    }
+
+    .diff-summary-files {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+
+    .diff-file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      font-size: 11px;
+      color: #9fb0c3;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .diff-file-chip .codicon {
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
     .diff-file-header {
       display: flex;
       align-items: center;
-      padding: 8px 12px;
+      padding: 8px 14px;
       background: rgba(0, 0, 0, 0.2);
       border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     }
 
-    .diff-file-status {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 2px 8px;
-      border-radius: 4px;
+    .diff-file-icon {
+      font-size: 16px;
       margin-right: 8px;
+      flex-shrink: 0;
+    }
+
+    .diff-file-status {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 3px;
+      margin-right: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
 
     .diff-file-status.create {
-      background: rgba(126, 231, 135, 0.2);
+      background: rgba(126, 231, 135, 0.25);
       color: #7ee787;
     }
 
     .diff-file-status.update {
-      background: rgba(123, 223, 246, 0.2);
+      background: rgba(123, 223, 246, 0.25);
       color: #7bdff6;
     }
 
     .diff-file-status.delete {
-      background: rgba(248, 81, 73, 0.2);
+      background: rgba(248, 81, 73, 0.25);
       color: #f85149;
     }
 
     .diff-file-path {
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 12px;
-      color: var(--text);
+      color: #e6edf3;
       flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .diff-stats {
       display: flex;
-      gap: 8px;
+      gap: 10px;
       font-size: 11px;
       font-family: monospace;
+      margin-left: 12px;
     }
 
     .diff-additions {
       color: #7ee787;
+      font-weight: 600;
     }
 
     .diff-deletions {
       color: #f85149;
+      font-weight: 600;
     }
 
     .diff-body {
       max-height: 300px;
       overflow-y: auto;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.5;
     }
 
     .diff-line {
       display: flex;
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 12px;
-      line-height: 1.5;
+      min-height: 22px;
     }
 
     .diff-line-unchanged {
       background: transparent;
     }
 
+    /* Copilot-style: prominent red/green line backgrounds */
     .diff-line-added {
-      background: rgba(126, 231, 135, 0.15);
+      background: rgba(46, 160, 67, 0.15);
+      border-left: 3px solid #2ea043;
     }
 
     .diff-line-added .line-prefix {
       color: #7ee787;
-      background: rgba(126, 231, 135, 0.2);
+      background: rgba(46, 160, 67, 0.2);
+    }
+
+    .diff-line-added .line-content {
+      color: #aff5b4;
     }
 
     .diff-line-removed {
-      background: rgba(248, 81, 73, 0.15);
+      background: rgba(248, 81, 73, 0.12);
+      border-left: 3px solid #da3633;
     }
 
     .diff-line-removed .line-prefix {
       color: #f85149;
-      background: rgba(248, 81, 73, 0.2);
+      background: rgba(248, 81, 73, 0.15);
+    }
+
+    .diff-line-removed .line-content {
+      color: #ffa198;
     }
 
     .line-num {
-      min-width: 40px;
-      padding: 0 8px;
+      min-width: 50px;
+      padding: 0 10px;
       text-align: right;
       color: rgba(255, 255, 255, 0.3);
       user-select: none;
-      border-right: 1px solid rgba(255, 255, 255, 0.05);
+      border-right: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.15);
+    }
+
+    .line-num.old {
+      background: rgba(248, 81, 73, 0.08);
+    }
+
+    .line-num.new {
+      background: rgba(46, 160, 67, 0.08);
     }
 
     .line-prefix {
-      min-width: 20px;
-      padding: 0 4px;
+      min-width: 24px;
+      padding: 0 6px;
       text-align: center;
       user-select: none;
+      font-weight: 700;
     }
 
     .line-content {
       flex: 1;
-      padding: 0 8px;
+      padding: 0 12px;
       white-space: pre;
       overflow-x: auto;
     }
@@ -552,10 +686,33 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       transition: all 0.15s ease;
     }
 
-    .btn-accept {
-      background: linear-gradient(135deg, #238636, #2ea043);
-      color: white;
-    }
+     .btn-accept,
+     .btn-reject,
+     .btn-view {
+       background: linear-gradient(135deg, #238636, #2ea043);
+       color: white;
+       border: none;
+       border-radius: 6px;
+       padding: 10px 20px;
+       font-size: 13px;
+       font-weight: 600;
+       cursor: pointer;
+       transition: all 0.2s;
+     }
+     
+     .btn-accept:hover,
+     .btn-reject:hover,
+     .btn-view:hover {
+       background: linear-gradient(135deg, #2ea043, #3fb950);
+       transform: translateY(-1px);
+       box-shadow: 0 4px 12px rgba(46, 160, 67, 0.3);
+     }
+     
+     .btn-accept:active,
+     .btn-reject:active,
+     .btn-view:active {
+       transform: translateY(0);
+     }
 
     .btn-accept:hover {
       background: linear-gradient(135deg, #2ea043, #3fb950);
@@ -577,10 +734,7 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
 <body>
   <div class="container">
     <header class="header">
-      <div class="header-left">
-        <div class="status-indicator"></div>
-        <div class="logo">Klyr</div>
-      </div>
+      <div class="logo">Klyr</div>
       <div class="header-controls">
         <select id="modeSelect">
           <option value="agent">Agent</option>
@@ -600,10 +754,10 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
         </div>
         <div class="composer-section">
           <textarea id="promptInput" placeholder="Ask Klyr anything..."></textarea>
-          <div class="composer-actions">
-            <div class="hint">Press Ctrl/Cmd+Enter to send</div>
-            <button id="sendButton">Send</button>
-          </div>
+         <div class="composer-actions">
+           <div class="hint">Press Ctrl/Cmd+Enter to send</div>
+           <button id="sendButton" class="btn-send">Send</button>
+         </div>
         </div>
       </div>
 
@@ -686,6 +840,52 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       contextEl.innerHTML = state.contextRefs.map(ref => '<div style="font-size:11px; padding:4px; color:#9fb0c3;">' + escapeHtml(ref.path) + '</div>').join('');
     }
 
+    function getFileIcon(filePath) {
+      const lowerPath = filePath.toLowerCase();
+      const parts = lowerPath.split('.');
+      const ext = parts.length >= 2 ? parts[parts.length - 1] : '';
+      
+      const iconMap = {
+        js: { icon: 'symbol-numeric', color: '#f7df1e', label: 'JavaScript' },
+        jsx: { icon: 'symbol-numeric', color: '#61dafb', label: 'React' },
+        ts: { icon: 'symbol-numeric', color: '#3178c6', label: 'TypeScript' },
+        tsx: { icon: 'symbol-numeric', color: '#3178c6', label: 'React TS' },
+        json: { icon: 'json', color: '#f5a623', label: 'JSON' },
+        html: { icon: 'globe', color: '#e34c26', label: 'HTML' },
+        css: { icon: 'paintcan', color: '#264de4', label: 'CSS' },
+        scss: { icon: 'paintcan', color: '#c6538c', label: 'SCSS' },
+        py: { icon: 'symbol-string', color: '#3776ab', label: 'Python' },
+        java: { icon: 'coffee', color: '#b07219', label: 'Java' },
+        go: { icon: 'file-code', color: '#00add8', label: 'Go' },
+        rs: { icon: 'file-code', color: '#dea584', label: 'Rust' },
+        md: { icon: 'book', color: '#083fa1', label: 'Markdown' },
+        yaml: { icon: 'settings-gear', color: '#cb171e', label: 'YAML' },
+        yml: { icon: 'settings-gear', color: '#cb171e', label: 'YAML' },
+        sh: { icon: 'terminal-bash', color: '#89e051', label: 'Shell' },
+        sql: { icon: 'database', color: '#e38c00', label: 'SQL' },
+        vue: { icon: 'code', color: '#42b883', label: 'Vue' },
+        svg: { icon: 'file-media', color: '#ffb13b', label: 'SVG' },
+        png: { icon: 'file-media', color: '#a074c4', label: 'Image' },
+        jpg: { icon: 'file-media', color: '#a074c4', label: 'Image' },
+        txt: { icon: 'document', color: '#9fb0c3', label: 'Text' },
+        xml: { icon: 'code', color: '#0060ac', label: 'XML' },
+      };
+      
+      // Check exact filenames
+      if (lowerPath.includes('package.json')) return { icon: 'package', color: '#cb171e', label: 'Package' };
+      if (lowerPath.includes('vite.config')) return { icon: 'zap', color: '#646cff', label: 'Vite' };
+      if (lowerPath.includes('tsconfig')) return { icon: 'symbol-numeric', color: '#3178c6', label: 'TSConfig' };
+      if (lowerPath.includes('eslint')) return { icon: 'checklist', color: '#4b32c3', label: 'ESLint' };
+      if (lowerPath.includes('prettier')) return { icon: 'checklist', color: '#56b3b4', label: 'Prettier' };
+      if (lowerPath.includes('dockerfile')) return { icon: 'box', color: '#384d54', label: 'Docker' };
+      if (lowerPath.includes('gitignore')) return { icon: 'git-branch', color: '#f14e32', label: 'Git' };
+      if (lowerPath.includes('readme')) return { icon: 'book', color: '#9fb0c3', label: 'Readme' };
+      if (lowerPath.includes('license')) return { icon: 'law', color: '#6d8086', label: 'License' };
+      
+      if (ext in iconMap) return iconMap[ext];
+      return { icon: 'file-text', color: '#9fb0c3', label: 'File' };
+    }
+
     function renderDiff() {
       if (!state.diffPreview || state.diffPreview.length === 0) {
         diffEl.innerHTML = '<div style="color: var(--muted); padding: 20px; text-align: center;">No changes pending</div>';
@@ -695,61 +895,83 @@ export function buildWebviewHtml(nonce: string, state?: WebviewState): string {
       
       let html = '';
       
+      // Copilot-style summary header
+      const totalChanges = state.diffPreview.length;
+      html += '<div class="diff-summary-header">';
+      html += '<span class="diff-summary-changes">Changes: ' + totalChanges + '</span>';
+      html += '<span class="diff-summary-files">';
+      
+      state.diffPreview.forEach((change, index) => {
+        const fileInfo = getFileIcon(change.path);
+        const fileName = change.path.split(/[/\\]/).pop() || change.path;
+        html += '<span class="diff-file-chip">';
+        html += '<span class="codicon codicon-' + fileInfo.icon + '" style="color: ' + fileInfo.color + '; font-size: 14px;"></span>';
+        html += '<span title="' + escapeHtml(change.path) + '">' + escapeHtml(fileName) + '</span>';
+        html += '</span>';
+        if (index < totalChanges - 1) {
+          html += '<span style="color: rgba(255,255,255,0.3);">•</span>';
+        }
+      });
+      html += '</span>';
+      html += '</div>';
+      
+      // Render each file diff
       for (const change of state.diffPreview) {
         const statusClass = change.operation === 'create' ? 'create' : change.operation === 'delete' ? 'delete' : 'update';
-        const statusText = change.operation === 'create' ? 'NEW FILE' : change.operation === 'delete' ? 'DELETE' : 'MODIFY';
-        const statusBg = change.operation === 'create' ? 'background: rgba(126, 231, 135, 0.2); color: #7ee787;' : 
-                        change.operation === 'delete' ? 'background: rgba(248, 81, 73, 0.2); color: #f85149;' : 
-                        'background: rgba(123, 223, 246, 0.2); color: #7bdff6;';
+        const statusText = change.operation === 'create' ? 'A' : change.operation === 'delete' ? 'D' : 'M';
+        const fileInfo = getFileIcon(change.path);
         
-        html += '<div style="margin-bottom: 16px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden;">';
+        html += '<div class="diff-container">';
         
-        // Header
-        html += '<div style="display: flex; align-items: center; padding: 10px 12px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.05);">';
-        html += '<span style="' + statusBg + ' padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-right: 10px;">' + statusText + '</span>';
-        html += '<span style="font-family: monospace; font-size: 12px; color: #e6edf3; flex: 1;">' + escapeHtml(change.path) + '</span>';
-        html += '<span style="font-size: 11px; margin-left: 10px;">';
-        if (change.additions > 0) html += '<span style="color: #7ee787;">+' + change.additions + '</span> ';
-        if (change.deletions > 0) html += '<span style="color: #f85149;">-' + change.deletions + '</span>';
-        html += '</span></div>';
+        // File header with icon
+        html += '<div class="diff-file-header">';
+        html += '<span class="diff-file-icon codicon codicon-' + fileInfo.icon + '" style="color: ' + fileInfo.color + ';"></span>';
+        html += '<span class="diff-file-status ' + statusClass + '">' + statusText + '</span>';
+        html += '<span class="diff-file-path" title="' + escapeHtml(change.path) + '">' + escapeHtml(change.path) + '</span>';
+        html += '<div class="diff-stats">';
+        if (change.additions > 0) html += '<span class="diff-additions">+' + change.additions + '</span>';
+        if (change.deletions > 0) html += '<span class="diff-deletions">-' + change.deletions + '</span>';
+        html += '</div></div>';
         
-        // Diff content
-        html += '<div style="max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px;">';
+        // Diff content with proper styling
+        html += '<div class="diff-body">';
         
-        // If we have diff HTML, use it
         if (change.diffHtml) {
           html += change.diffHtml;
         } else if (change.diff) {
-          // Parse and render unified diff
           const lines = change.diff.split('\n');
           for (const line of lines) {
             if (line.startsWith('+++') || line.startsWith('---')) continue;
             
             if (line.startsWith('+') && !line.startsWith('+++')) {
-              // Added line - GREEN
-              html += '<div style="display: flex; background: rgba(126, 231, 135, 0.15); border-left: 3px solid #7ee787; padding: 2px 8px;">';
-              html += '<span style="width: 20px; color: #7ee787; user-select: none;">+</span>';
-              html += '<span style="color: #7ee787;">' + escapeHtml(line.slice(1)) + '</span></div>';
+              html += '<div class="diff-line diff-line-added">';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-prefix">+</span>';
+              html += '<span class="line-content">' + escapeHtml(line.slice(1)) + '</span>';
+              html += '</div>';
             } else if (line.startsWith('-') && !line.startsWith('---')) {
-              // Removed line - RED
-              html += '<div style="display: flex; background: rgba(248, 81, 73, 0.15); border-left: 3px solid #f85149; padding: 2px 8px;">';
-              html += '<span style="width: 20px; color: #f85149; user-select: none;">-</span>';
-              html += '<span style="color: #f85149;">' + escapeHtml(line.slice(1)) + '</span></div>';
+              html += '<div class="diff-line diff-line-removed">';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-prefix">-</span>';
+              html += '<span class="line-content">' + escapeHtml(line.slice(1)) + '</span>';
+              html += '</div>';
             } else if (line.startsWith('@@')) {
-              // Hunk header - BLUE
-              html += '<div style="background: rgba(123, 223, 246, 0.1); padding: 4px 8px; color: #7bdff6; font-size: 11px;">' + escapeHtml(line) + '</div>';
+              html += '<div style="background: rgba(88, 166, 255, 0.1); padding: 4px 12px; color: #58a6ff; font-size: 11px; font-family: monospace;">' + escapeHtml(line) + '</div>';
             } else if (line.startsWith(' ')) {
-              // Context line
-              html += '<div style="display: flex; padding: 2px 8px;">';
-              html += '<span style="width: 20px; color: rgba(255,255,255,0.3); user-select: none;">&nbsp;</span>';
-              html += '<span style="color: #9fb0c3;">' + escapeHtml(line.slice(1)) + '</span></div>';
+              html += '<div class="diff-line diff-line-unchanged">';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-num"></span>';
+              html += '<span class="line-prefix" style="color: rgba(255,255,255,0.3);">&nbsp;</span>';
+              html += '<span class="line-content" style="color: #8b949e;">' + escapeHtml(line.slice(1)) + '</span>';
+              html += '</div>';
             }
           }
         } else if (change.summary) {
-          // Just show summary if no diff
           html += '<div style="padding: 20px; color: var(--muted); text-align: center;">';
           html += '<div style="color: #e6edf3; margin-bottom: 8px;">' + escapeHtml(change.summary) + '</div>';
-          html += '<div style="font-size: 11px;">No line-by-line diff available</div></div>';
+          html += '</div>';
         }
         
         html += '</div></div>';

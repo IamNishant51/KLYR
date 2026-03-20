@@ -5,10 +5,13 @@ export interface KlyrConfig {
     context: ContextConfig;
     execution: ExecutionConfig;
     inline: InlineCompletionConfig;
+    mcp: McpConfig;
+    rag: RagConfig;
 }
 export interface OllamaConfig {
     baseUrl: string;
     model: string;
+    visionModel: string;
     temperature: number;
     timeoutMs: number;
     maxRetries: number;
@@ -29,6 +32,24 @@ export interface InlineCompletionConfig {
     enabled: boolean;
     maxPrefixChars: number;
     maxSuffixChars: number;
+}
+export interface McpServerConfig {
+    name: string;
+    command: string;
+    args: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    enabled: boolean;
+    timeoutMs: number;
+}
+export interface McpConfig {
+    enabled: boolean;
+    servers: McpServerConfig[];
+}
+export interface RagConfig {
+    strictCitations: boolean;
+    trustedDomains: string[];
+    trustedGitHubOrgs: string[];
 }
 export declare function defaultConfig(): KlyrConfig;
 export declare class Logger {

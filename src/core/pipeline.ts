@@ -82,6 +82,13 @@ export class Pipeline {
 
     this.log(`Starting pipeline for: ${context.prompt.slice(0, 80)}...`);
 
+    // Detect if this is a project creation request
+    const isProjectCreation = /\b(create|build|make|generate|setup)\b.*\b(project|app|website|portfolio|react|next|node)\b/i.test(context.prompt) ||
+                             /\b(react|next|vite|angular|vue)\b.*\b(app|project)\b/i.test(context.prompt);
+    
+    // For project creation, retrieve more files AND scan the target directory
+    const retrievalLimit = isProjectCreation ? 20 : finalConfig.retrievalMaxResults;
+
     try {
       await this.emitStage(callbacks, 'planning', 'Understanding the request and selecting an execution mode.');
       const plan = await this.planner.plan({
@@ -116,10 +123,26 @@ export class Pipeline {
       await indexPromise;
       const contextMatches = await this.contextEngine.query({
         query: [context.prompt, plan.intent, context.activeFilePath ?? '', context.selection ?? ''].join('\n'),
-        maxResults: finalConfig.retrievalMaxResults,
+        maxResults: retrievalLimit,
       });
       const retrievedDocuments = uniqueDocumentsByPath(contextMatches.map((match) => match.document));
-      const mentionedDocuments = this.findPromptMentionedDocuments(context.prompt, context.documents);
+      
+      // For project creation, also scan the target directory for existing files
+      let mentionedDocuments: ContextDocument[] = [];
+      if (isProjectCreation) {
+        mentionedDocuments = this.findPromptMentionedDocuments(context.prompt, context.documents);
+        // Also scan the target folder if mentioned
+        const targetFolder = this.extractTargetFolder(context.prompt);
+        if (targetFolder) {
+          const folderFiles = context.documents.filter(doc => 
+            doc.uri.replace(/\\/g, '/').toLowerCase().includes(targetFolder.toLowerCase())
+          );
+          mentionedDocuments = uniqueDocumentsByPath([...mentionedDocuments, ...folderFiles]);
+        }
+      } else {
+        mentionedDocuments = this.findPromptMentionedDocuments(context.prompt, context.documents);
+      }
+      
       const finalDocuments = uniqueDocumentsByPath([...mentionedDocuments, ...retrievedDocuments]);
       const [memoryMatches, recentMemory] = await Promise.all([
         memoryMatchesPromise,
@@ -235,7 +258,9 @@ export class Pipeline {
         plan.intent,
         context.prompt
       );
-      if (operationGuardErrors.length > 0) {
+      const scopedPathErrors = this.detectScopedPathViolations(fixerResult.draft, context.prompt);
+      const combinedGuardErrors = [...operationGuardErrors, ...scopedPathErrors];
+      if (combinedGuardErrors.length > 0) {
         return {
           ok: false,
           mode: plan.mode,
@@ -243,9 +268,9 @@ export class Pipeline {
           plan,
           validation: {
             ok: false,
-            errors: operationGuardErrors,
+            errors: combinedGuardErrors,
           },
-          error: operationGuardErrors.map((error) => error.message).join('\n'),
+          error: combinedGuardErrors.map((error) => error.message).join('\n'),
           retrievedDocuments: finalDocuments,
           contextSummary,
           logs: this.logs,
@@ -300,8 +325,25 @@ export class Pipeline {
     retrievedDocuments: ContextDocument[],
     memory: string
   ): CoderContext {
+    const editableDocuments = retrievedDocuments.filter((document) =>
+      this.isWorkspaceDocument(context.workspaceRoot, document.uri)
+    );
+    const externalReferenceNotes = retrievedDocuments
+      .filter((document) => !this.isWorkspaceDocument(context.workspaceRoot, document.uri))
+      .slice(0, 8)
+      .map(
+        (document) =>
+          `- ${document.title ?? document.uri} (${document.uri})\n${this.trimText(document.content, 420)}`
+      )
+      .join('\n\n');
+
+    const mergedMemory =
+      externalReferenceNotes.length > 0
+        ? `${memory}\n\nExternal reference context (read-only, never edit as file paths):\n${externalReferenceNotes}`
+        : memory;
+
     return {
-      files: retrievedDocuments.map((document) => ({
+      files: editableDocuments.map((document) => ({
         path: this.toRelativePath(context.workspaceRoot, document.uri),
         content: document.content,
         reason: document.source ?? 'workspace',
@@ -316,13 +358,30 @@ export class Pipeline {
         workspaceSummary: context.workspaceSummary,
         dependencyAllowlist: context.dependencyAllowlist,
         openFiles: context.openFiles.map((file) => this.toRelativePath(context.workspaceRoot, file)),
-        retrievedPaths: retrievedDocuments.map((document) =>
+        retrievedPaths: editableDocuments.map((document) =>
           this.toRelativePath(context.workspaceRoot, document.uri)
         ),
       },
-      memory,
+      memory: mergedMemory,
       notes: summarizeContext(retrievedDocuments),
     };
+  }
+
+  private isWorkspaceDocument(workspaceRoot: string, uri: string): boolean {
+    if (/^(https?:\/\/|mcp:\/\/|klyr:\/\/|external:\/\/)/i.test(uri)) {
+      return false;
+    }
+
+    const normalizedRoot = workspaceRoot.replace(/\\/g, '/').toLowerCase();
+    const normalizedUri = uri.replace(/\\/g, '/').toLowerCase();
+    return normalizedUri.startsWith(normalizedRoot);
+  }
+
+  private trimText(value: string, maxChars: number): string {
+    if (value.length <= maxChars) {
+      return value;
+    }
+    return `${value.slice(0, maxChars)}...`;
   }
 
   private toRelativePath(workspaceRoot: string, absoluteOrRelativePath: string): string {
@@ -425,5 +484,74 @@ export class Pipeline {
     }
 
     return errors;
+  }
+
+  private detectScopedPathViolations(draft: CodeDraft, prompt: string): ValidationError[] {
+    const scope = this.extractScopedFolder(prompt);
+    if (!scope) {
+      return [];
+    }
+
+    const normalizedScope = this.normalizePath(scope).replace(/\/+$/, '').toLowerCase();
+    const errors: ValidationError[] = [];
+
+    for (const change of draft.changes) {
+      const normalizedPath = this.normalizePath(change.path).toLowerCase();
+      const inScope =
+        normalizedPath === normalizedScope || normalizedPath.startsWith(`${normalizedScope}/`);
+
+      if (!inScope) {
+        errors.push({
+          code: 'OUT_OF_SCOPE_PATH',
+          message: `Prompt scoped edits to folder "${scope}", but change targeted "${change.path}" outside that folder.`,
+          file: change.path,
+        });
+      }
+    }
+
+    return errors;
+  }
+
+  private extractScopedFolder(prompt: string): string | undefined {
+    const patterns = [
+      /\b(?:in|inside|within)\s+([a-zA-Z0-9._/-]+)\s+(?:folder|directory)\b/i,
+      /\bunder\s+([a-zA-Z0-9._/-]+)\b/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = prompt.match(pattern);
+      const candidate = match?.[1]?.trim();
+      if (!candidate) {
+        continue;
+      }
+
+      const lower = candidate.toLowerCase();
+      if (['this', 'current', 'root', 'workspace', '.'].includes(lower)) {
+        continue;
+      }
+
+      return candidate.replace(/^\.\//, '').replace(/^\//, '');
+    }
+
+    return undefined;
+  }
+
+  private extractTargetFolder(prompt: string): string | undefined {
+    // Match patterns like "in myapp", "in myapp folder", "create in folder"
+    const patterns = [
+      /\b(?:in|inside|to|into)\s+([a-zA-Z0-9_-]+)\s*(?:folder|directory)?\b/i,
+      /\bcreate\s+(?:a\s+)?(?:new\s+)?(?:react|next|vite|node)\s+(?:app|project)\s+(?:in|inside|to|into)\s+([a-zA-Z0-9_-]+)\b/i,
+      /\b([a-zA-Z0-9_-]+)\/(?:src|app|components|pages)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = prompt.match(pattern);
+      const candidate = match?.[1]?.trim();
+      if (candidate && !['a', 'an', 'the', 'new', 'folder'].includes(candidate.toLowerCase())) {
+        return candidate.replace(/[./\\]+$/, ''); // Remove trailing slashes
+      }
+    }
+
+    return undefined;
   }
 }

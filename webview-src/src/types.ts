@@ -8,6 +8,13 @@ export interface ChatMessage {
   isStreaming?: boolean;
 }
 
+export interface ChatImageAttachment {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  name?: string;
+}
+
 export interface Plan {
   intent: string;
   goal: string;

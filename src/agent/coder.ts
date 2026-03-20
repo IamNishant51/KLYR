@@ -43,11 +43,20 @@ export interface DraftFileChange {
   operation?: 'create' | 'update' | 'delete';
 }
 
+export interface CommandStep {
+  command: string;
+  cwd?: string;
+  timeout?: number;
+  allowFailure?: boolean;
+  description?: string;
+}
+
 export interface CodeDraft {
   changes: DraftFileChange[];
   summary: string;
   rationale: string;
   followUpQuestions?: string[];
+  commands?: CommandStep[];
 }
 
 export interface CoderAnswer {

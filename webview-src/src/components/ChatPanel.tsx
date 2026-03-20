@@ -5,6 +5,7 @@ import InputBox from './InputBox';
 import ThinkingTrace from './ThinkingTrace';
 import { estimateMessageHeight, getLatestAssistantMessage, isBusyPhase } from '../lib/chat';
 import type {
+  ChatImageAttachment,
   ChatMessage as ChatMessageType,
   ContextReference,
   DiffChange,
@@ -26,6 +27,9 @@ interface ChatPanelProps {
   thinkingTrace: ThinkingTraceEntry[];
   inputValue: string;
   onInputChange: (value: string) => void;
+  attachments: ChatImageAttachment[];
+  onAddImage: (attachment: ChatImageAttachment) => void;
+  onRemoveImage: (id: string) => void;
   selectedModel: string;
   availableModels: string[];
   onModelChange: (model: string) => void
@@ -64,6 +68,9 @@ function ChatPanel({
   thinkingTrace,
   inputValue,
   onInputChange,
+  attachments,
+  onAddImage,
+  onRemoveImage,
   selectedModel,
   availableModels,
   onModelChange,
@@ -172,65 +179,83 @@ function ChatPanel({
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
-        className="klyr-glass-strong shrink-0 border-b"
+        className="shrink-0 border-b"
         style={{
           borderColor: 'var(--k-border)',
+          background: 'color-mix(in srgb, var(--k-surface) 95%, transparent)',
+          padding: '8px 10px',
         }}
       >
-        <div className="mx-auto w-full max-w-5xl px-4 py-2">
-          <div className="klyr-fade-up flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div>
-                <div className="text-sm font-semibold" style={{ color: 'var(--k-fg)' }}>Klyr</div>
-                <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--k-muted)' }}>
-                  <span 
-                    className="h-1.5 w-1.5 rounded-full animate-klyr-pulse"
-                    style={{ background: 'var(--k-accent)' }} 
-                  />
-                  {statusDetail || 'Ready'}
-                </div>
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold" style={{ color: 'var(--k-fg)' }}>Klyr Agent</div>
+              <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--k-muted)' }}>
+                <span 
+                  className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
+                  style={{ background: 'var(--k-accent)' }} 
+                />
+                <span className="truncate max-w-[120px] sm:max-w-none">{statusDetail || 'Ready for prompt'}</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <ActionIconButton label="New chat" onClick={onNewChat} compact={compact}>
+            <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              <button
+                type="button"
+                aria-label="New chat"
+                title="New chat"
+                onClick={onNewChat}
+                className="klyr-icon-button h-8 w-8"
+              >
                 <NewChatIcon />
-              </ActionIconButton>
-              <ActionIconButton label="History" onClick={onOpenHistory} compact={compact}>
+              </button>
+              <button
+                type="button"
+                aria-label="History"
+                title="History"
+                onClick={onOpenHistory}
+                className="klyr-icon-button h-8 w-8"
+              >
                 <HistoryIcon />
-              </ActionIconButton>
-              <ActionIconButton label="Settings" onClick={onOpenSettings} compact={compact}>
+              </button>
+              <button
+                type="button"
+                aria-label="Settings"
+                title="Settings"
+                onClick={onOpenSettings}
+                className="klyr-icon-button h-8 w-8"
+              >
                 <SettingsIcon />
-              </ActionIconButton>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       <div ref={scrollerRef} onScroll={handleScroll} className="klyr-scrollbar flex-1 overflow-y-auto">
-        <div className="mx-auto flex h-full w-full max-w-5xl flex-col px-4">
+        <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-3 sm:px-4">
           {messages.length === 0 && !shouldShowThinkingBubble ? (
-            <div className="klyr-fade-up flex h-full flex-col items-center justify-center gap-8">
+            <div className="klyr-fade-up flex h-full flex-col items-center justify-center gap-6 sm:gap-8">
               <div className="animate-klyr-glow flex items-center justify-center">
                 <WelcomeLogo compact={narrow} />
               </div>
-              <div className="text-center">
-                <h2 className="klyr-fade-up mb-2 text-lg font-medium" style={{ color: 'var(--k-fg)', animationDelay: '0.1s' }}>
+              <div className="text-center px-4">
+                <h2 className="klyr-fade-up mb-2 text-base sm:text-lg font-medium" style={{ color: 'var(--k-fg)', animationDelay: '0.1s' }}>
                   Welcome to Klyr
                 </h2>
-                <p className="klyr-fade-up text-sm" style={{ color: 'var(--k-muted)', animationDelay: '0.2s' }}>
+                <p className="klyr-fade-up text-xs sm:text-sm" style={{ color: 'var(--k-muted)', animationDelay: '0.2s' }}>
                   Your AI coding assistant, powered by local LLMs
                 </p>
               </div>
-              <div className="klyr-fade-up grid grid-cols-2 gap-3 sm:grid-cols-3" style={{ animationDelay: '0.3s' }}>
+              <div className="klyr-fade-up grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 px-4 sm:px-0 max-w-[280px] sm:max-w-none" style={{ animationDelay: '0.3s' }}>
                 <QuickAction label="Explain code" icon={<ExplainIcon />} />
-                <QuickAction label="Fix bugs" icon={<BugIcon />} />
+                <QuickAction label="Fix bug" icon={<BugIcon />} />
                 <QuickAction label="Write tests" icon={<CheckIcon />} />
                 <QuickAction label="Refactor" icon={<RefactorIcon />} />
                 <QuickAction label="Optimize" icon={<BoltIcon />} />
-                <QuickAction label="Document" icon={<DocumentIcon />} />
+                <QuickAction label="Generate docs" icon={<DocumentIcon />} />
               </div>
             </div>
           ) : showVirtualizedList ? (
@@ -315,12 +340,12 @@ function ChatPanel({
 
           {diffPreview.length > 0 ? (
             <div id="klyr-diff-preview" className="mt-4">
-              <div className="klyr-fade-up flex items-center justify-between rounded-lg border px-4 py-3" style={{
+              <div className="klyr-fade-up flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border px-3 sm:px-4 py-3" style={{
                 borderColor: 'color-mix(in srgb, var(--k-accent) 40%, var(--k-input-border))',
                 background: 'color-mix(in srgb, var(--k-selection) 30%, var(--k-surface))',
               }}>
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg" style={{
                     background: 'color-mix(in srgb, var(--k-accent) 20%, transparent)',
                     color: 'var(--k-accent)'
                   }}>
@@ -328,27 +353,27 @@ function ChatPanel({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                   </div>
-                  <div>
-                    <div className="text-sm font-medium" style={{ color: 'var(--k-fg)' }}>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate" style={{ color: 'var(--k-fg)' }}>
                       {diffPreview.length} file{diffPreview.length === 1 ? '' : 's'} changed
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--k-muted)' }}>
+                    <div className="text-xs truncate hidden sm:block" style={{ color: 'var(--k-muted)' }}>
                       {plan?.summary || 'Review changes before applying'}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setChangesExpanded((current) => !current)}
-                    className="klyr-inline-button"
+                    className="klyr-inline-button flex-1 sm:flex-none"
                   >
                     {changesExpanded ? 'Hide' : 'View'}
                   </button>
                   <button
                     type="button"
                     onClick={onRejectDraft}
-                    className="klyr-inline-button"
+                    className="klyr-inline-button flex-1 sm:flex-none"
                     style={{ borderColor: 'color-mix(in srgb, #f85149 40%, var(--k-input-border))' }}
                   >
                     Undo
@@ -356,7 +381,7 @@ function ChatPanel({
                   <button
                     type="button"
                     onClick={onApplyDraft}
-                    className="klyr-action-button rounded-lg px-4 py-2 text-sm font-medium"
+                    className="klyr-action-button flex-1 sm:flex-none rounded-lg px-4 py-2 text-sm font-medium"
                   >
                     Apply
                   </button>
@@ -377,10 +402,13 @@ function ChatPanel({
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-5xl px-4 pb-4">
+      <div className="mx-auto w-full max-w-3xl px-4 pb-4">
         <InputBox
           inputValue={inputValue}
           onInputChange={onInputChange}
+          attachments={attachments}
+          onAddImage={onAddImage}
+          onRemoveImage={onRemoveImage}
           selectedModel={selectedModel}
           availableModels={availableModels}
           onModelChange={onModelChange}
@@ -492,7 +520,7 @@ function WelcomeLogo({ compact = false }: { compact?: boolean }) {
       <svg
         viewBox="0 0 24 24"
         aria-label="Klyr logo"
-        className={`relative ${compact ? 'h-16 w-16' : 'h-24 w-24'}`}
+        className={`relative ${compact ? 'h-14 w-14 sm:h-16 sm:w-16' : 'h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24'}`}
         style={{
           color: 'var(--k-fg)',
           filter: 'drop-shadow(0 8px 26px color-mix(in srgb, var(--k-fg) 28%, transparent))',
@@ -529,7 +557,7 @@ function QuickAction({ label, icon }: QuickActionProps) {
   return (
     <button
       type="button"
-      className="klyr-fade-up klyr-hover-lift flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-all"
+      className="klyr-fade-up klyr-hover-lift flex items-center gap-2 rounded-lg border px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm transition-all"
       style={{
         borderColor: 'var(--k-input-border)',
         background: 'color-mix(in srgb, var(--k-surface) 50%, transparent)',
@@ -545,10 +573,10 @@ function QuickAction({ label, icon }: QuickActionProps) {
         e.currentTarget.style.background = 'color-mix(in srgb, var(--k-surface) 50%, transparent)';
       }}
     >
-      <span className="flex h-4 w-4 items-center justify-center" style={{ color: 'var(--k-accent)' }}>
+      <span className="flex h-4 w-4 items-center justify-center flex-shrink-0" style={{ color: 'var(--k-accent)' }}>
         {icon}
       </span>
-      <span className="font-medium">{label}</span>
+      <span className="font-medium truncate">{label}</span>
     </button>
   );
 }

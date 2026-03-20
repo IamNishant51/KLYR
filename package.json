@@ -81,6 +81,11 @@
           "default": "qwen2.5-coder",
           "description": "Ollama model name to use for code generation."
         },
+        "klyr.ollama.visionModel": {
+          "type": "string",
+          "default": "llava:latest",
+          "description": "Ollama vision model used to analyze pasted images in chat."
+        },
         "klyr.ollama.temperature": {
           "type": "number",
           "default": 0,
@@ -150,6 +155,90 @@
           "type": "number",
           "default": 1200,
           "description": "Maximum suffix characters sent for inline completions."
+        },
+        "klyr.mcp.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Model Context Protocol (MCP) server integration for external tools."
+        },
+        "klyr.mcp.servers": {
+          "type": "array",
+          "default": [],
+          "description": "List of MCP servers. Example entries include sequential-thinking and stitch servers.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "command"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Logical server name (for example: sequential-thinking or stitch)."
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable used to start the MCP server."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Command-line arguments for the server process."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Optional working directory for the MCP server process."
+              },
+              "env": {
+                "type": "object",
+                "description": "Optional environment variables for the server process."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Enable or disable this MCP server entry."
+              },
+              "timeoutMs": {
+                "type": "number",
+                "default": 10000,
+                "description": "Timeout per MCP request in milliseconds."
+              }
+            }
+          }
+        },
+        "klyr.rag.strictCitations": {
+          "type": "boolean",
+          "default": true,
+          "description": "When enabled, chat answers using external context must include source citations, otherwise the answer is rejected."
+        },
+        "klyr.rag.trustedDomains": {
+          "type": "array",
+          "default": [
+            "wikipedia.org",
+            "github.com",
+            "raw.githubusercontent.com",
+            "duckduckgo.com",
+            "developer.mozilla.org",
+            "dribbble.com",
+            "behance.net",
+            "awwwards.com",
+            "land-book.com",
+            "siteinspire.com"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Domain allowlist used by external RAG retrieval."
+        },
+        "klyr.rag.trustedGitHubOrgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional GitHub organization allowlist for repository retrieval. Empty means no org restriction."
         }
       }
     }

@@ -41,59 +41,62 @@
   .klyr-shell {
     @apply flex h-screen w-full flex-col overflow-hidden;
     color: var(--k-fg);
-    background:
-      radial-gradient(circle at 8% -12%, color-mix(in srgb, var(--k-accent) 14%, transparent), transparent 38%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--k-bg) 90%, var(--k-surface) 10%) 0%,
-        var(--k-bg) 100%
-      );
+    background: linear-gradient(180deg, color-mix(in srgb, var(--k-bg) 96%, #000 4%) 0%, var(--k-bg) 100%);
   }
 
   .klyr-fade-up {
-    animation: klyr-fade-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+    animation: klyr-fade-up 0.2s ease-out;
     will-change: opacity, transform;
   }
 
   .klyr-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
+    -ms-overflow-style: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--k-muted) 45%, transparent) transparent;
   }
 
   .klyr-scrollbar::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;
+    width: 8px;
+    height: 8px;
+    display: block;
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--k-muted) 45%, transparent);
+  }
+
+  .klyr-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   .klyr-action-button {
     background: var(--k-button-bg);
     color: var(--k-button-fg);
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--k-button-bg) 28%, transparent);
+    border: 1px solid color-mix(in srgb, var(--k-button-bg) 65%, var(--k-border));
+    box-shadow: none;
     transition:
-      transform 0.16s ease,
-      box-shadow 0.16s ease,
-      filter 0.16s ease;
+      background-color 0.12s ease,
+      border-color 0.12s ease,
+      filter 0.12s ease;
     will-change: transform;
   }
 
   .klyr-action-button:hover {
     background: var(--k-button-hover);
-    box-shadow: 0 14px 30px color-mix(in srgb, var(--k-button-bg) 36%, transparent);
-    transform: scale(1.03);
+    border-color: color-mix(in srgb, var(--k-button-hover) 70%, var(--k-border));
+    filter: brightness(1.04);
   }
 
   .klyr-action-button:active {
-    transform: scale(0.97);
+    filter: brightness(0.98);
   }
 
   .klyr-secondary-button {
     border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 70%, transparent);
+    background: color-mix(in srgb, var(--k-input-bg) 58%, transparent);
     color: var(--k-input-fg);
     transition:
-      transform 0.16s ease,
-      box-shadow 0.16s ease,
       background-color 0.16s ease,
       border-color 0.16s ease,
       color 0.16s ease;
@@ -102,23 +105,20 @@
 
   .klyr-secondary-button:hover {
     border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 60%, transparent);
-    box-shadow: 0 10px 22px color-mix(in srgb, var(--k-accent) 22%, transparent);
-    transform: scale(1.03);
+    background: color-mix(in srgb, var(--k-selection) 42%, transparent);
+    color: var(--k-fg);
   }
 
   .klyr-secondary-button:active {
-    transform: scale(0.97);
+    filter: brightness(0.98);
   }
 
   .klyr-inline-button {
     @apply rounded-full px-3 py-1.5 text-[11px] font-medium;
     color: var(--k-input-fg);
     border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 68%, transparent);
+    background: color-mix(in srgb, var(--k-input-bg) 55%, transparent);
     transition:
-      transform 0.16s ease,
-      box-shadow 0.16s ease,
       background-color 0.16s ease,
       border-color 0.16s ease,
       color 0.16s ease;
@@ -127,23 +127,20 @@
 
   .klyr-inline-button:hover {
     border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 58%, transparent);
+    background: color-mix(in srgb, var(--k-selection) 40%, transparent);
     color: var(--k-fg);
-    transform: scale(1.03);
   }
 
   .klyr-inline-button:active {
-    transform: scale(0.97);
+    filter: brightness(0.98);
   }
 
   .klyr-icon-button {
     @apply flex h-10 w-10 items-center justify-center rounded-full;
     color: var(--k-muted);
     border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 62%, transparent);
+    background: color-mix(in srgb, var(--k-input-bg) 52%, transparent);
     transition:
-      transform 0.16s ease,
-      box-shadow 0.16s ease,
       background-color 0.16s ease,
       border-color 0.16s ease,
       color 0.16s ease;
@@ -152,14 +149,12 @@
 
   .klyr-icon-button:hover {
     border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 56%, transparent);
+    background: color-mix(in srgb, var(--k-selection) 38%, transparent);
     color: var(--k-fg);
-    box-shadow: 0 10px 22px color-mix(in srgb, var(--k-accent) 24%, transparent);
-    transform: scale(1.03);
   }
 
   .klyr-icon-button:active {
-    transform: scale(0.97);
+    filter: brightness(0.98);
   }
 
   .klyr-cursor {
@@ -174,11 +169,9 @@
 
   .klyr-welcome-card {
     border: 1px solid color-mix(in srgb, var(--k-border) 80%, transparent);
-    background:
-      radial-gradient(circle at 8% 8%, color-mix(in srgb, var(--k-accent) 12%, transparent), transparent 48%),
-      color-mix(in srgb, var(--k-surface) 85%, transparent);
-    box-shadow: 0 26px 60px color-mix(in srgb, var(--k-bg) 66%, transparent);
-    animation: klyr-fade-up 0.42s cubic-bezier(0.2, 0.8, 0.2, 1), klyr-welcome-glow 5.8s ease-in-out infinite;
+    background: color-mix(in srgb, var(--k-surface) 86%, transparent);
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--k-bg) 60%, transparent);
+    animation: klyr-fade-up 0.24s ease-out;
   }
 
   .klyr-welcome-badge {
@@ -478,14 +471,14 @@
   }
 
   .klyr-glass {
-    background: color-mix(in srgb, var(--k-surface) 80%, transparent);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: color-mix(in srgb, var(--k-surface) 88%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
   }
 
   .klyr-glass-strong {
-    background: color-mix(in srgb, var(--k-surface) 90%, transparent);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
+    background: color-mix(in srgb, var(--k-surface) 94%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
 }

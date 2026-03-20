@@ -46,64 +46,110 @@ export class FileSystemExecutor implements Executor {
     let totalAdditions = 0;
     let totalDeletions = 0;
 
+    // Log draft info for debugging
+    console.log('[KLYR] Preview - Draft summary:', draft.summary);
+    console.log('[KLYR] Preview - Draft changes count:', draft.changes.length);
+    console.log('[KLYR] Preview - Commands:', draft.commands?.length ?? 0);
+
+    if (draft.changes.length === 0) {
+      console.warn('[KLYR] WARNING: Draft has 0 changes! LLM may not have followed instructions.');
+      console.warn('[KLYR] Draft rationale:', draft.rationale);
+      console.warn('[KLYR] Draft followUpQuestions:', draft.followUpQuestions);
+    }
+
     for (const change of draft.changes) {
       const resolvedPath = this.resolveWorkspacePath(workspaceRoot, change.path);
       const diskOriginalContent = await this.readExistingContent(resolvedPath);
-      let proposedContent = change.proposedContent ?? '';
       
       // Check if file already exists on disk (non-empty string means file exists)
       const fileExists = diskOriginalContent.length > 0;
       
-      // Determine operation: if file exists = update, else = create
-      let operation: 'create' | 'update' | 'delete' = fileExists ? 'update' : 'create';
+      // Determine the correct operation based on LLM intent and file existence
+      let operation: 'create' | 'update' | 'delete';
+      let finalProposedContent = change.proposedContent ?? '';
       
-      // SAFETY: If file exists but operation is "create", change to "update"
-      if (fileExists && change.operation === 'create') {
-        console.warn(`[KLYR] File ${change.path} already exists, changing operation from create to update`);
-        operation = 'update';
+      if (change.operation === 'delete' && fileExists) {
+        // User wants to delete an existing file
+        operation = 'delete';
+        // For delete operations, proposedContent is not used in apply
+      } else {
+        // For create/update intents, or delete on non-existent file:
+        // We want the file to exist with the LLM's specified content
+        operation = fileExists ? 'update' : 'create';
+        finalProposedContent = change.proposedContent ?? '';
       }
-
-      // SAFETY: If update operation, ensure proposedContent includes ALL of disk's original content
-      if (operation === 'update' && fileExists) {
-        // Check if LLM output is just user prompt text (garbage)
-        const isPromptLike = /^(add|create|update|delete|remove|fix|change|modify)\s+(my|this|the|your)/i.test(proposedContent.trim());
-        
-        if (isPromptLike) {
-          console.warn('[KLYR] LLM output appears to be user prompt, using original content');
-          proposedContent = diskOriginalContent;
-        } else if (!proposedContent.includes(diskOriginalContent)) {
-          console.warn('[KLYR] LLM did not preserve original content from disk, auto-restoring...');
-          // LLM's proposed content doesn't include disk's original - prepend it
-          proposedContent = proposedContent + '\n' + diskOriginalContent;
-        }
-      }
-
-      const originalContent = diskOriginalContent;
-
+      
       // Generate detailed diff like Cursor/Copilot
       const detailedDiff = generateDetailedDiff(
         change.path,
-        originalContent,
-        proposedContent,
+        diskOriginalContent,
+        finalProposedContent,
         operation
       );
-
+      
       totalAdditions += detailedDiff.additions;
       totalDeletions += detailedDiff.deletions;
-
+      
       // Generate unified diff for compatibility
-      const unifiedDiff = generateUnifiedDiff(change.path, originalContent, proposedContent);
-
+      const unifiedDiff = generateUnifiedDiff(change.path, diskOriginalContent, finalProposedContent);
+      
       changes.push({
         ...change,
         operation,
-        originalContent,
-        proposedContent,
+        originalContent: diskOriginalContent,
+        proposedContent: finalProposedContent,
         diff: unifiedDiff,
         detailedDiff,
         diffHtml: this.generateDiffHtml(detailedDiff),
       });
     }
+
+     for (const change of draft.changes) {
+       const resolvedPath = this.resolveWorkspacePath(workspaceRoot, change.path);
+       const diskOriginalContent = await this.readExistingContent(resolvedPath);
+       
+       // Check if file already exists on disk (non-empty string means file exists)
+       const fileExists = diskOriginalContent.length > 0;
+       
+       // Determine the correct operation based on LLM intent and file existence
+       let operation: 'create' | 'update' | 'delete';
+       let finalProposedContent = change.proposedContent ?? '';
+       
+       if (change.operation === 'delete' && fileExists) {
+         // User wants to delete an existing file
+         operation = 'delete';
+         // For delete operations, proposedContent is not used in apply
+       } else {
+         // For create/update intents, or delete on non-existent file:
+         // We want the file to exist with the LLM's specified content
+         operation = fileExists ? 'update' : 'create';
+         finalProposedContent = change.proposedContent ?? '';
+       }
+       
+       // Generate detailed diff like Cursor/Copilot
+       const detailedDiff = generateDetailedDiff(
+         change.path,
+         diskOriginalContent,
+         finalProposedContent,
+         operation
+       );
+       
+       totalAdditions += detailedDiff.additions;
+       totalDeletions += detailedDiff.deletions;
+       
+       // Generate unified diff for compatibility
+       const unifiedDiff = generateUnifiedDiff(change.path, diskOriginalContent, finalProposedContent);
+       
+       changes.push({
+         ...change,
+         operation,
+         originalContent: diskOriginalContent,
+         proposedContent: finalProposedContent,
+         diff: unifiedDiff,
+         detailedDiff,
+         diffHtml: this.generateDiffHtml(detailedDiff),
+       });
+     }
 
     return {
       summary: draft.summary,
@@ -184,10 +230,40 @@ export class FileSystemExecutor implements Executor {
       return result;
     }
 
-    for (const change of preview.changes) {
+    // Sort changes: create directories first, then create files, then update files, then delete
+    const sortedChanges = [...preview.changes].sort((a, b) => {
+      const priority = (op: string) => {
+        if (op === 'create') return 1;
+        if (op === 'update') return 2;
+        if (op === 'delete') return 3;
+        return 4;
+      };
+      return priority(a.operation ?? 'update') - priority(b.operation ?? 'update');
+    });
+
+    // First pass: collect all unique directories needed
+    const directoriesNeeded = new Set<string>();
+    for (const change of sortedChanges) {
+      if (change.operation !== 'delete') {
+        const filePath = this.resolveWorkspacePath(workspaceRoot, change.path);
+        const dir = path.dirname(filePath);
+        directoriesNeeded.add(dir);
+      }
+    }
+
+    // Create all directories first
+    for (const dir of directoriesNeeded) {
+      try {
+        await fs.mkdir(dir, { recursive: true });
+      } catch (error) {
+        console.warn(`[KLYR] Failed to create directory ${dir}:`, error);
+      }
+    }
+
+    for (const change of sortedChanges) {
       try {
         const filePath = this.resolveWorkspacePath(workspaceRoot, change.path);
-
+        
         if (!this.isWithinWorkspace(filePath, workspaceRoot)) {
           result.errors.push({
             path: change.path,
@@ -197,16 +273,27 @@ export class FileSystemExecutor implements Executor {
         }
 
         const operation = this.resolveOperation(change);
-
-        if (operation !== 'delete' && !change.proposedContent) {
+        const fileExists = await this.pathExists(filePath);
+        
+        // Apply the same logic as in preview to determine final operation
+        let finalOperation = operation;
+        if (change.operation === 'delete' && fileExists) {
+          // User wants to delete an existing file
+          finalOperation = 'delete';
+        } else {
+          // For create/update intents: we want the file to exist with the specified content
+          finalOperation = fileExists ? 'update' : 'create';
+        }
+        
+        if (finalOperation !== 'delete' && !change.proposedContent) {
           result.errors.push({
             path: change.path,
             message: 'Missing proposed content.',
           });
           continue;
         }
-
-        if (operation === 'delete') {
+        
+        if (finalOperation === 'delete') {
           const existsOnDisk = await this.pathExists(filePath);
           if (!existsOnDisk) {
             result.errors.push({
@@ -228,8 +315,6 @@ export class FileSystemExecutor implements Executor {
           continue;
         }
 
-        const dir = path.dirname(filePath);
-        await fs.mkdir(dir, { recursive: true });
         await fs.writeFile(filePath, change.proposedContent ?? '', 'utf-8');
         result.applied += 1;
         result.changedPaths.push(change.path);

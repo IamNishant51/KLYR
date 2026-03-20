@@ -33,6 +33,7 @@ export class BasicValidator implements Validator {
     }
 
     const dependencyAllowlist = await this.loadDependencyAllowlist(input.workspaceRoot);
+    const packageAllowlistCache = new Map<string, Set<string>>();
     const allowedPaths = new Set(
       (input.allowedRelativePaths ?? []).map((value) => this.normalizeRelativePath(value))
     );
@@ -44,6 +45,7 @@ export class BasicValidator implements Validator {
           change,
           input.workspaceRoot,
           dependencyAllowlist,
+          packageAllowlistCache,
           allowedPaths,
           input.allowNewFiles ?? true
         ))
@@ -60,6 +62,7 @@ export class BasicValidator implements Validator {
     change: DraftFileChange,
     workspaceRoot: string,
     dependencyAllowlist: Set<string>,
+    packageAllowlistCache: Map<string, Set<string>>,
     allowedPaths: Set<string>,
     allowNewFiles: boolean
   ): Promise<ValidationError[]> {
@@ -136,6 +139,13 @@ export class BasicValidator implements Validator {
 
     const scriptKind = this.scriptKindForPath(absolutePath);
     if (scriptKind !== undefined) {
+      const scopedDependencyAllowlist = await this.loadScopedDependencyAllowlist(
+        absolutePath,
+        workspaceRoot,
+        dependencyAllowlist,
+        packageAllowlistCache
+      );
+
       const diagnostics = this.parseDiagnostics(absolutePath, proposedContent, scriptKind);
       for (const diagnostic of diagnostics) {
         errors.push({
@@ -151,7 +161,7 @@ export class BasicValidator implements Validator {
           moduleName,
           absolutePath,
           workspaceRoot,
-          dependencyAllowlist
+          scopedDependencyAllowlist
         );
         if (importError) {
           errors.push(importError);
@@ -386,6 +396,59 @@ export class BasicValidator implements Validator {
     }
 
     return allowlist;
+  }
+
+  private async loadScopedDependencyAllowlist(
+    sourceFilePath: string,
+    workspaceRoot: string,
+    rootAllowlist: Set<string>,
+    cache: Map<string, Set<string>>
+  ): Promise<Set<string>> {
+    const rootNormalized = path.resolve(workspaceRoot);
+    let currentDir = path.dirname(path.resolve(sourceFilePath));
+
+    while (currentDir.startsWith(rootNormalized)) {
+      const packageJsonPath = path.join(currentDir, 'package.json');
+
+      if (cache.has(packageJsonPath)) {
+        const cached = cache.get(packageJsonPath);
+        if (cached) {
+          return cached;
+        }
+      }
+
+      try {
+        const raw = await fs.readFile(packageJsonPath, 'utf-8');
+        const parsed = JSON.parse(raw) as {
+          dependencies?: Record<string, string>;
+          devDependencies?: Record<string, string>;
+          peerDependencies?: Record<string, string>;
+        };
+
+        const scoped = new Set<string>(rootAllowlist);
+        for (const deps of [parsed.dependencies, parsed.devDependencies, parsed.peerDependencies]) {
+          if (!deps) {
+            continue;
+          }
+          for (const dep of Object.keys(deps)) {
+            scoped.add(dep);
+          }
+        }
+
+        cache.set(packageJsonPath, scoped);
+        return scoped;
+      } catch {
+        cache.set(packageJsonPath, rootAllowlist);
+      }
+
+      const parent = path.dirname(currentDir);
+      if (parent === currentDir) {
+        break;
+      }
+      currentDir = parent;
+    }
+
+    return rootAllowlist;
   }
 
   private detectUnsafePatterns(content: string, filePath: string): ValidationError[] {

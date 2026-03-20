@@ -1,4 +1,4 @@
-export type UiStatus = 'idle' | 'planning' | 'retrieving' | 'thinking' | 'validating' | 'review' | 'executing';
+export type UiStatus = 'idle' | 'planning' | 'retrieving' | 'thinking' | 'validating' | 'review' | 'executing' | 'fixing';
 export interface UiChatMessage {
     id: string;
     role: 'user' | 'assistant' | 'system';

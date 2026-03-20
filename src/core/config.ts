@@ -6,11 +6,14 @@ export interface KlyrConfig {
   context: ContextConfig;
   execution: ExecutionConfig;
   inline: InlineCompletionConfig;
+  mcp: McpConfig;
+  rag: RagConfig;
 }
 
 export interface OllamaConfig {
   baseUrl: string;
   model: string;
+  visionModel: string;
   temperature: number;
   timeoutMs: number;
   maxRetries: number;
@@ -36,12 +39,34 @@ export interface InlineCompletionConfig {
   maxSuffixChars: number;
 }
 
+export interface McpServerConfig {
+  name: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  enabled: boolean;
+  timeoutMs: number;
+}
+
+export interface McpConfig {
+  enabled: boolean;
+  servers: McpServerConfig[];
+}
+
+export interface RagConfig {
+  strictCitations: boolean;
+  trustedDomains: string[];
+  trustedGitHubOrgs: string[];
+}
+
 export function defaultConfig(): KlyrConfig {
   return {
     logLevel: 'info',
     ollama: {
       baseUrl: 'http://localhost:11434',
       model: 'qwen2.5-coder',
+      visionModel: 'llava:latest',
       temperature: 0,
       timeoutMs: 180000,
       maxRetries: 2,
@@ -62,6 +87,26 @@ export function defaultConfig(): KlyrConfig {
       enabled: true,
       maxPrefixChars: 2500,
       maxSuffixChars: 1200,
+    },
+    mcp: {
+      enabled: false,
+      servers: [],
+    },
+    rag: {
+      strictCitations: true,
+      trustedDomains: [
+        'wikipedia.org',
+        'github.com',
+        'raw.githubusercontent.com',
+        'duckduckgo.com',
+        'developer.mozilla.org',
+        'dribbble.com',
+        'behance.net',
+        'awwwards.com',
+        'land-book.com',
+        'siteinspire.com',
+      ],
+      trustedGitHubOrgs: [],
     },
   };
 }

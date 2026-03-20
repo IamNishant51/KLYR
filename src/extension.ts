@@ -1,16 +1,20 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { BasicPlanner, LLMPoweredPlanner, type PlanMode, type PlanResult } from './agent/planner';
 import { FileSystemExecutor, type DiffPreview } from './agent/executor';
 import { BasicValidator } from './agent/validator';
 import { OllamaCoder } from './agent/ollamaCoder';
+import { CommandExecutor, type CommandResult } from './agent/commandExecutor';
+import type { CodeDraft, DraftFileChange } from './agent/coder';
 import {
   InMemoryContextEngine,
   chunkContextDocument,
   type ContextDocument,
 } from './context/contextEngine';
 import { OllamaEmbeddingProvider } from './context/embeddings';
+import { PersistentEmbeddingCacheProvider } from './context/persistentEmbeddingCache';
 import { formatMemoryForContext, hydrateMemoryEntries, InMemoryStore } from './context/memory';
 import {
   buildWorkspaceOutline,
@@ -20,9 +24,11 @@ import {
   type WorkspaceIndex,
 } from './context/workspaceIndex';
 import { ContextOrchestrator, type ContextRequest } from './context/orchestrator';
+import { GroundedRagService } from './context/groundedRag';
+import { McpManager } from './mcp/manager';
 import { HttpOllamaClient } from './llm/ollamaClient';
 import { defaultConfig, Logger, type KlyrConfig } from './core/config';
-import { Pipeline, type PipelineStage } from './core/pipeline';
+import { Pipeline, type PipelineResult, type PipelineStage } from './core/pipeline';
 import type { ApplyResult } from './agent/executor';
 import {
   type UiChatMessage,
@@ -32,6 +38,14 @@ import {
   type UiStatus,
   type WebviewState,
 } from './ui/webview';
+
+interface ParsedError {
+  file?: string;
+  line?: number;
+  column?: number;
+  message: string;
+  severity: 'error' | 'warning';
+}
 
 interface RuntimeContext {
   workspaceRoot: string;
@@ -51,9 +65,29 @@ interface ExternalKnowledge {
   source: 'internet' | 'wikipedia';
 }
 
+interface ChatImageAttachment {
+  id?: string;
+  dataUrl: string;
+  mimeType?: string;
+  name?: string;
+}
+
+interface CommandPlan {
+  summary: string;
+  commands: string[];
+}
+
+interface CommandExecutionResult {
+  command: string;
+  ok: boolean;
+  exitCode: number;
+  output: string;
+}
+
 const SESSION_STATE_KEY = 'klyr.chatSession';
 const MEMORY_STATE_KEY = 'klyr.memoryEntries';
 const CHAT_HISTORY_STATE_KEY = 'klyr.chatHistory';
+const OLLAMA_AUTOSTART_ATTEMPTED_KEY = 'klyr.ollamaAutostartAttempted';
 
 interface ChatHistoryEntry {
   id: string;
@@ -509,6 +543,7 @@ export function activate(context: vscode.ExtensionContext) {
     const logger = new Logger('info');
 
     logger.debug('Klyr extension activating...');
+    void controller.ensureOllamaServerStartedOnFirstLaunch();
 
     context.subscriptions.push(
       vscode.commands.registerCommand('klyr.openChat', () => controller.openChat()),
@@ -579,6 +614,7 @@ class KlyrExtensionController {
   private readonly extensionContext: vscode.ExtensionContext;
   private readonly logger = new Logger('info');
   private readonly memory = new InMemoryStore();
+  private readonly mcpManager = new McpManager(this.logger);
   private readonly contextOrchestrator = new ContextOrchestrator({
     modelTokenLimit: 8000,
     responseBuffer: 0.2,
@@ -589,6 +625,8 @@ class KlyrExtensionController {
   private readonly state: WebviewState;
   private chatView?: vscode.WebviewView;
   private pendingPreview?: DiffPreview;
+  private pendingDraft?: CodeDraft;
+  private pendingCommands: Array<{ command: string; allowFailure?: boolean }> = [];
   private stagedEdits = new Map<string, StagedEdit>();
   private lastPrompt?: string;
   private lastPlan?: PlanResult;
@@ -624,6 +662,81 @@ class KlyrExtensionController {
     );
     for (const entry of storedMemory) {
       void this.memory.add(entry);
+    }
+  }
+
+  public ensureOllamaServerStartedOnFirstLaunch(): void {
+    void this.autoStartOllamaServerOnFirstLaunch();
+  }
+
+  private async autoStartOllamaServerOnFirstLaunch(): Promise<void> {
+    const alreadyAttempted = this.extensionContext.globalState.get<boolean>(
+      OLLAMA_AUTOSTART_ATTEMPTED_KEY,
+      false
+    );
+    if (alreadyAttempted) {
+      return;
+    }
+
+    const config = this.getConfig();
+    if (!this.isLocalOllamaBaseUrl(config.ollama.baseUrl)) {
+      await this.extensionContext.globalState.update(OLLAMA_AUTOSTART_ATTEMPTED_KEY, true);
+      return;
+    }
+
+    const alreadyReachable = await this.isOllamaReachable(config.ollama.baseUrl);
+    if (alreadyReachable) {
+      await this.extensionContext.globalState.update(OLLAMA_AUTOSTART_ATTEMPTED_KEY, true);
+      return;
+    }
+
+    try {
+      const child = spawn('ollama', ['serve'], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+
+      child.unref();
+      child.once('error', (error) => {
+        this.logger.warn(
+          `Failed to auto-start Ollama server: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+
+      await this.extensionContext.globalState.update(OLLAMA_AUTOSTART_ATTEMPTED_KEY, true);
+      this.logger.info('Attempted to auto-start Ollama server on first launch.');
+    } catch (error) {
+      this.logger.warn(
+        `Error while auto-starting Ollama server: ${error instanceof Error ? error.message : String(error)}`
+      );
+      await this.extensionContext.globalState.update(OLLAMA_AUTOSTART_ATTEMPTED_KEY, true);
+    }
+  }
+
+  private isLocalOllamaBaseUrl(baseUrl: string): boolean {
+    try {
+      const parsed = new URL(baseUrl);
+      const host = parsed.hostname.toLowerCase();
+      return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '::1';
+    } catch {
+      return false;
+    }
+  }
+
+  private async isOllamaReachable(baseUrl: string): Promise<boolean> {
+    const client = new HttpOllamaClient({
+      baseUrl,
+      timeoutMs: 1500,
+      maxRetries: 0,
+      retryBackoffMs: 0,
+    });
+
+    try {
+      await client.listModels();
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -812,7 +925,12 @@ class KlyrExtensionController {
           : payload && typeof payload === 'object' && 'prompt' in payload
             ? String((payload as { prompt?: unknown }).prompt ?? '').trim()
             : '';
-      if (!prompt) {
+      const images =
+        payload && typeof payload === 'object' && 'images' in payload
+          ? this.parseImageAttachments((payload as { images?: unknown }).images)
+          : [];
+
+      if (!prompt && images.length === 0) {
         return;
       }
 
@@ -821,7 +939,7 @@ class KlyrExtensionController {
           ? String((payload as { modeHint?: unknown }).modeHint ?? '')
           : 'chat';
       const modeHint: PlanMode = rawMode === 'edit' || rawMode === 'inline' ? rawMode : 'chat';
-      await this.submitPrompt(prompt, modeHint);
+      await this.submitPrompt(prompt, modeHint, images);
     }
 
     if (typedMessage.type === 'diff:decision') {
@@ -975,6 +1093,8 @@ class KlyrExtensionController {
     this.requestSerial += 1;
     await this.discardStagedEdits();
     this.pendingPreview = undefined;
+      this.pendingDraft = undefined;
+      this.pendingCommands = [];
     this.state.diffPreview = [];
     this.setStatus('idle', 'Stopped.');
     await this.persistState();
@@ -1012,7 +1132,11 @@ class KlyrExtensionController {
     }
   }
 
-  private async submitPrompt(prompt: string, modeHint: PlanMode): Promise<void> {
+  private async submitPrompt(
+    prompt: string,
+    modeHint: PlanMode,
+    images: ChatImageAttachment[] = []
+  ): Promise<void> {
     const runtime = await this.buildRuntimeContext();
     if (!runtime) {
       this.appendMessage(
@@ -1026,15 +1150,39 @@ class KlyrExtensionController {
 
     const requestId = ++this.requestSerial;
     this.pendingPreview = undefined;
+      this.pendingDraft = undefined;
+      this.pendingCommands = [];
     this.state.diffPreview = [];
-    this.appendMessage('user', prompt);
-    this.lastPrompt = prompt;
+    const userPrompt = prompt.trim() || 'Analyze the attached image and help with this issue.';
+    const promptWithAttachmentHint =
+      images.length > 0
+        ? `${userPrompt}\n\n[Attached image${images.length === 1 ? '' : 's'}: ${images.length}]`
+        : userPrompt;
+
+    this.appendMessage('user', promptWithAttachmentHint);
+    this.lastPrompt = userPrompt;
     this.lastPlan = undefined;
     this.setStatus('planning', 'Preparing plan from current workspace context.');
     this.syncWebview();
 
+    const commandHandled = await this.tryExecutePromptCommands(runtime, userPrompt, requestId);
+    if (commandHandled) {
+      await this.persistState();
+      this.syncWebview();
+      return;
+    }
+
     let documentsForPipeline = runtime.documents;
     try {
+      if (images.length > 0) {
+        this.setStatus('retrieving', 'Analyzing pasted image attachments with vision model.');
+        this.syncWebview();
+        const visionDoc = await this.buildImageAnalysisDocument(userPrompt, images, runtime.config);
+        if (visionDoc) {
+          documentsForPipeline = [visionDoc, ...documentsForPipeline];
+        }
+      }
+
       this.setStatus('retrieving', 'Building optimized context from workspace and conversation.');
       this.syncWebview();
       const conversationHistory = this.state.messages
@@ -1045,7 +1193,7 @@ class KlyrExtensionController {
         .map((message) => ({ role: message.role, content: message.content }));
 
       const contextResponse = await this.contextOrchestrator.orchestrate({
-        query: prompt,
+        query: userPrompt,
         workspacePath: runtime.workspaceRoot,
         currentFilePath: runtime.activeFilePath,
         conversationHistory,
@@ -1065,20 +1213,49 @@ class KlyrExtensionController {
         documentsForPipeline = [orchestratedDocument, ...runtime.documents];
       }
 
-      const externalKnowledge = await this.fetchExternalKnowledgeForPrompt(prompt);
-      if (externalKnowledge.length > 0) {
-        const externalDocs: ContextDocument[] = externalKnowledge.map((entry, index) => ({
-          id: `klyr-external-${Date.now()}-${index}`,
-          uri: `external://${entry.source}/${index}`,
-          title: entry.title,
-          content: this.trimExternalKnowledge(entry.content, 8000),
-          updatedAt: Date.now(),
-          source: 'memory',
-          tags: ['external', entry.source],
-        }));
-        documentsForPipeline = [...externalDocs, ...documentsForPipeline];
-        this.setStatus('retrieving', `Enriched context with ${externalKnowledge.length} external source(s) (internet/Wikipedia).`);
+      const persistentEmbeddings = new PersistentEmbeddingCacheProvider(
+        new OllamaEmbeddingProvider(runtime.config.ollama.baseUrl),
+        path.join(this.extensionContext.globalStorageUri.fsPath, 'rag-embedding-cache.json')
+      );
+
+      const ragService = new GroundedRagService(
+        persistentEmbeddings,
+        {
+          trustedDomains: runtime.config.rag.trustedDomains,
+          trustedGitHubOrgs: runtime.config.rag.trustedGitHubOrgs,
+        },
+        this.logger
+      );
+      const ragResult = await ragService.retrieve(userPrompt);
+      if (ragResult.documents.length > 0) {
+        const groundingPolicy = this.createGroundingPolicyDocument(ragResult.references);
+        documentsForPipeline = [groundingPolicy, ...ragResult.documents, ...documentsForPipeline];
+        this.setStatus(
+          'retrieving',
+          `Grounded RAG loaded ${ragResult.references.length} source(s) from internet/GitHub.`
+        );
         this.syncWebview();
+      }
+
+      if (ragResult.warnings.length > 0) {
+        this.logger.debug(`RAG warnings: ${ragResult.warnings.join(' | ')}`);
+      }
+
+      if (runtime.config.mcp.enabled && runtime.config.mcp.servers.length > 0) {
+        const mcpResult = await this.mcpManager.collectContext(prompt, runtime.config.mcp.servers);
+        if (mcpResult.documents.length > 0) {
+          const mcpPolicyDocument = this.createMcpPolicyDocument(mcpResult.references);
+          documentsForPipeline = [mcpPolicyDocument, ...mcpResult.documents, ...documentsForPipeline];
+          this.setStatus(
+            'retrieving',
+            `MCP enriched context from ${mcpResult.references.length} tool call(s).`
+          );
+          this.syncWebview();
+        }
+
+        if (mcpResult.warnings.length > 0) {
+          this.logger.debug(`MCP warnings: ${mcpResult.warnings.join(' | ')}`);
+        }
       }
     } catch (error) {
       this.logger.warn(
@@ -1086,43 +1263,66 @@ class KlyrExtensionController {
       );
     }
 
-    const pipeline = this.createPipeline();
     let streamingMessageId: string | undefined;
-    const result = await pipeline.execute(
-      {
-        workspaceRoot: runtime.workspaceRoot,
-        prompt,
-        activeFilePath: runtime.activeFilePath,
-        selection: runtime.selection,
-        modeHint,
-        workspaceSummary: runtime.workspaceSummary,
-        dependencyAllowlist: runtime.dependencyAllowlist,
-        openFiles: runtime.openFiles,
-        documents: documentsForPipeline,
-        logger: this.logger,
-      },
-      {
-        maxAttempts: runtime.config.execution.maxAttempts,
-        retrievalMaxResults: runtime.config.context.retrievalMaxResults,
-        allowNewFiles: true,
-      },
-      {
-        onStage: async (stage, detail) => {
-          if (requestId !== this.requestSerial) {
-            return;
-          }
-          this.setStatus(mapPipelineStageToUiStatus(stage), detail);
-          this.syncWebview();
+    let result: PipelineResult;
+    let timeoutMs = runtime.config.ollama.timeoutMs;
+    const maxTimeoutRecoveries = 3;
+    let timeoutRecoveryAttempt = 0;
+
+    while (true) {
+      const pipeline = this.createPipeline({ timeoutMs });
+      result = await pipeline.execute(
+        {
+          workspaceRoot: runtime.workspaceRoot,
+          prompt: userPrompt,
+          activeFilePath: runtime.activeFilePath,
+          selection: runtime.selection,
+          modeHint,
+          workspaceSummary: runtime.workspaceSummary,
+          dependencyAllowlist: runtime.dependencyAllowlist,
+          openFiles: runtime.openFiles,
+          documents: documentsForPipeline,
+          logger: this.logger,
         },
-        onAnswerChunk: async (chunk) => {
-          if (requestId !== this.requestSerial) {
-            return;
-          }
-          streamingMessageId = this.appendStreamingChunk(streamingMessageId, chunk);
-          this.syncWebview();
+        {
+          maxAttempts: runtime.config.execution.maxAttempts,
+          retrievalMaxResults: runtime.config.context.retrievalMaxResults,
+          allowNewFiles: true,
         },
+        {
+          onStage: async (stage, detail) => {
+            if (requestId !== this.requestSerial) {
+              return;
+            }
+            this.setStatus(mapPipelineStageToUiStatus(stage), detail);
+            this.syncWebview();
+          },
+          onAnswerChunk: async (chunk) => {
+            if (requestId !== this.requestSerial) {
+              return;
+            }
+            streamingMessageId = this.appendStreamingChunk(streamingMessageId, chunk);
+            this.syncWebview();
+          },
+        }
+      );
+
+      if (result.ok || !this.isTimeoutErrorMessage(result.error)) {
+        break;
       }
-    );
+
+      timeoutRecoveryAttempt += 1;
+      if (timeoutRecoveryAttempt > maxTimeoutRecoveries) {
+        break;
+      }
+
+      timeoutMs = Math.min(timeoutMs * 2, 12 * 60 * 1000);
+      this.setStatus(
+        'thinking',
+        `Model timed out. Retrying with ${Math.round(timeoutMs / 1000)}s timeout (${timeoutRecoveryAttempt}/${maxTimeoutRecoveries}).`
+      );
+      this.syncWebview();
+    }
 
     if (requestId !== this.requestSerial) {
       return;
@@ -1146,6 +1346,23 @@ class KlyrExtensionController {
     }
 
     if (result.mode === 'chat' && result.answer) {
+      const citationCheck = this.enforceCitationPolicy(
+        result.answer.content,
+        result.retrievedDocuments,
+        runtime.config.rag.strictCitations
+      );
+
+      if (!citationCheck.ok) {
+        this.appendMessage(
+          'assistant',
+          `## Citation required\n${citationCheck.message}\n\nPlease ask again and include details so I can provide a fully cited answer.`
+        );
+        this.setStatus('idle', 'Strict citation mode blocked an uncited response.');
+        await this.persistState();
+        this.syncWebview();
+        return;
+      }
+
       if (!streamingMessageId) {
         this.appendMessage('assistant', result.answer.content);
       }
@@ -1157,6 +1374,8 @@ class KlyrExtensionController {
 
     if (result.preview) {
       this.pendingPreview = result.preview;
+      this.pendingDraft = result.draft;
+      this.pendingCommands = result.draft?.commands ?? [];
       this.state.diffPreview = result.preview.changes.map<UiDiffChange>((change) => ({
         path: change.path,
         diff: change.diff,
@@ -1279,6 +1498,8 @@ class KlyrExtensionController {
     if (decision === 'reject') {
       await this.discardStagedEdits();
       this.pendingPreview = undefined;
+      this.pendingDraft = undefined;
+      this.pendingCommands = [];
       this.state.diffPreview = [];
       this.state.totalAdditions = 0;
       this.state.totalDeletions = 0;
@@ -1409,6 +1630,8 @@ class KlyrExtensionController {
     clearAllDecorations();
     this.stagedEdits.clear();
     this.pendingPreview = undefined;
+      this.pendingDraft = undefined;
+      this.pendingCommands = [];
     this.state.diffPreview = [];
     this.state.totalAdditions = 0;
     this.state.totalDeletions = 0;
@@ -1430,28 +1653,383 @@ class KlyrExtensionController {
       await this.cleanupBackups(workspaceRoot);
       await this.recordDecisionMemory('success', []);
     } else {
-      this.appendMessage(
-        'assistant',
-        `## Applied successfully\n- **Changes**: ${applyResult.applied}\n- **Files**: ${this.formatFilePathList(applyResult.changedPaths)}`
-      );
-      await this.cleanupBackups(workspaceRoot);
-      await this.recordDecisionMemory('success', applyResult.changedPaths);
-
-      // Open changed files for quick review.
-      for (const changedPath of applyResult.changedPaths) {
-        const fullPath = path.join(workspaceRoot, changedPath);
-        try {
-          const doc = await vscode.workspace.openTextDocument(fullPath);
-          await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
-        } catch (error) {
-          console.error(`[Klyr] Failed to open changed file ${fullPath}:`, error);
+      const commands = this.pendingCommands;
+      let successMessage = `## Applied successfully\n- **Changes**: ${applyResult.applied}\n- **Files**: ${this.formatFilePathList(applyResult.changedPaths)}`;
+      
+      // Execute commands if any
+      if (commands.length > 0) {
+        this.appendMessage('assistant', successMessage);
+        await this.cleanupBackups(workspaceRoot);
+        await this.recordDecisionMemory('success', applyResult.changedPaths);
+        
+        this.setStatus('executing', `Executing ${commands.length} command(s)...`);
+        this.syncWebview();
+        
+        const commandExecutor = new CommandExecutor({
+          onOutput: (cmd, line) => {
+            console.log(`[KLYR] ${cmd}: ${line.trim()}`);
+          },
+          onComplete: (result) => {
+            console.log(`[KLYR] Command completed: ${result.command} (exit ${result.exitCode})`);
+          },
+        });
+        
+        const commandResults = await commandExecutor.executeAll(commands, workspaceRoot);
+        
+        // Build command results message
+        let commandMessage = `## Commands Executed\n`;
+        for (const result of commandResults) {
+          const status = result.success ? '✅' : '❌';
+          commandMessage += `\n${status} \`${result.command}\`\n`;
+          if (result.stderr && !result.success) {
+            commandMessage += `   Error: ${result.stderr.slice(0, 200)}`;
+          }
         }
+        
+        this.appendMessage('assistant', commandMessage);
+        
+        // Check if any commands failed (non-allowFailure)
+        const failedCommands = commandResults.filter(r => !r.success && !commands[commandResults.indexOf(r)].allowFailure);
+        if (failedCommands.length > 0) {
+          this.setStatus('idle', 'Commands failed. Check output above.');
+        } else {
+          this.setStatus('idle', 'Execution finished.');
+        }
+      } else {
+        this.appendMessage('assistant', successMessage);
+        await this.cleanupBackups(workspaceRoot);
+        await this.recordDecisionMemory('success', applyResult.changedPaths);
+        
+        // Run error fix loop if there were file changes
+        if (applyResult.applied > 0) {
+          this.appendMessage('assistant', 'Running error check...');
+          this.syncWebview();
+          
+          const errors = await this.runLintCheck(workspaceRoot);
+          
+          if (errors.length > 0) {
+            this.appendMessage('assistant', `Found ${errors.length} error(s). Starting error fix loop...`);
+            const fixResult = await this.runErrorFixLoop(workspaceRoot, errors);
+            if (fixResult.fixed) {
+              this.appendMessage('assistant', '✅ All errors fixed successfully!');
+            }
+          } else {
+            this.appendMessage('assistant', '✅ No errors found. Project looks good!');
+          }
+        }
+        
+        // Open changed files for quick review.
+        for (const changedPath of applyResult.changedPaths) {
+          const fullPath = path.join(workspaceRoot, changedPath);
+          try {
+            const doc = await vscode.workspace.openTextDocument(fullPath);
+            await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
+          } catch (error) {
+            console.error(`[Klyr] Failed to open changed file ${fullPath}:`, error);
+          }
+        }
+        this.setStatus('idle', 'Execution finished.');
       }
     }
 
     this.setStatus('idle', 'Execution finished.');
     await this.persistState();
     this.syncWebview();
+  }
+
+  private async runErrorFixLoop(
+    workspaceRoot: string,
+    initialErrors: string[]
+  ): Promise<{ fixed: boolean; totalErrors: number; iterations: number }> {
+    const MAX_ITERATIONS = 5;
+    let iterations = 0;
+    let currentErrors = initialErrors;
+    
+    // Track errors by file to help LLM understand context
+    const errorsByFile = this.groupErrorsByFile(currentErrors);
+    
+    while (iterations < MAX_ITERATIONS && currentErrors.length > 0) {
+      iterations++;
+      
+      this.setStatus('fixing', `Fixing errors (attempt ${iterations}/${MAX_ITERATIONS})...`);
+      this.syncWebview();
+      
+      // Parse errors and prepare fix request
+      const errorSummary = this.formatErrorsForLLM(currentErrors);
+      
+      this.appendMessage('assistant', `## Error Fix Loop (${iterations}/${MAX_ITERATIONS})\n\nFound ${currentErrors.length} error(s):\n${errorSummary}\n\nFixing...`);
+      
+      try {
+        // Read all workspace files for context
+        const files: Array<{ path: string; content: string }> = [];
+        
+        const readDir = async (dir: string) => {
+          try {
+            const entries = await fs.readdir(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+              const fullPath = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                await readDir(fullPath);
+              } else if (entry.isFile() && /\.(js|jsx|ts|tsx|json|html|css)$/i.test(entry.name)) {
+                const content = await fs.readFile(fullPath, 'utf-8');
+                files.push({
+                  path: toRelativePath(workspaceRoot, fullPath),
+                  content: content.slice(0, 8000),
+                });
+              }
+            }
+          } catch {}
+        };
+        
+        await readDir(workspaceRoot);
+        const contextFiles = files.slice(0, 20);
+        
+        // Call LLM to get fixes
+        const config = this.getConfig();
+        const llmClient = new HttpOllamaClient({
+          baseUrl: config.ollama.baseUrl,
+          timeoutMs: config.ollama.timeoutMs,
+          maxRetries: config.ollama.maxRetries,
+          retryBackoffMs: config.ollama.retryBackoffMs,
+        });
+        
+        // Create detailed fix prompt with error context
+        const fixPrompt = `FIX THESE ERRORS:\n\n${currentErrors.map((e, i) => `[${i + 1}] ${e}`).join('\n')}\n\nContext: The workspace has ${errorsByFile.size} file(s) with errors.\n\nINSTRUCTIONS:\n1. Analyze each error carefully\n2. Fix the root cause, not just symptoms\n3. Output ONLY valid JSON\n4. Include complete file content for each fix\n5. Do NOT add explanations or markdown\n\nSCHEMA:\n{"summary": "brief description of fixes", "changes": [{"path": "file path", "operation": "update", "proposedContent": "COMPLETE FIXED CONTENT"}]}`;
+
+        const fixResponse = await llmClient.chat({
+          model: this.selectedModelOverride ?? config.ollama.model,
+          messages: [
+            {
+              role: 'system',
+              content: `You are KLYR, an expert code fixer. Fix errors in code.
+- Analyze the error type and root cause
+- Fix the actual problem, not just hide symptoms
+- Output ONLY valid JSON
+- Include complete file content
+- Do NOT output explanations or markdown
+
+Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": "update", "proposedContent": "FULL FILE CONTENT"}]}`,
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                errors: currentErrors,
+                errorsByFile: Object.fromEntries(errorsByFile),
+                contextFiles,
+                workspaceRoot,
+              }, null, 2),
+            },
+          ],
+          temperature: 0,
+          stream: false,
+        });
+        
+        // Parse and apply fixes
+        let parsedFix;
+        try {
+          parsedFix = JSON.parse(fixResponse.content);
+        } catch {
+          this.appendMessage('assistant', 'Failed to parse fix response from LLM. Manual intervention required.');
+          return { fixed: false, totalErrors: currentErrors.length, iterations };
+        }
+        
+        if (parsedFix.changes && Array.isArray(parsedFix.changes) && parsedFix.changes.length > 0) {
+          const executor = new FileSystemExecutor();
+          
+          // Apply fixes directly
+          let appliedCount = 0;
+          for (const change of parsedFix.changes) {
+            if (change.path && change.proposedContent) {
+              const filePath = path.join(workspaceRoot, change.path);
+              try {
+                await fs.mkdir(path.dirname(filePath), { recursive: true });
+                await fs.writeFile(filePath, change.proposedContent, 'utf-8');
+                appliedCount++;
+                console.log(`[KLYR] Applied fix: ${change.path}`);
+              } catch (err) {
+                console.error(`[KLYR] Failed to apply fix for ${change.path}:`, err);
+              }
+            }
+          }
+          
+          this.appendMessage('assistant', `Applied ${appliedCount} fix(es): ${parsedFix.summary || 'Fixes applied'}`);
+        } else {
+          this.appendMessage('assistant', 'No changes were made by the fixer. Trying different approach...');
+        }
+        
+        // Run lint again to check for remaining errors
+        const newErrors = await this.runLintCheck(workspaceRoot);
+        currentErrors = newErrors;
+        
+        if (currentErrors.length === 0) {
+          this.appendMessage('assistant', '✅ All errors fixed!');
+          return { fixed: true, totalErrors: 0, iterations };
+        }
+        
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Unknown error';
+        console.error('[KLYR] Error fix loop failed:', msg);
+        this.appendMessage('assistant', `Error fix attempt failed: ${msg}`);
+        break;
+      }
+    }
+    
+    if (currentErrors.length > 0) {
+      this.appendMessage('assistant', `⚠️ Could not fix all errors after ${iterations} attempts. ${currentErrors.length} error(s) remain.`);
+    }
+    
+    return { fixed: currentErrors.length === 0, totalErrors: currentErrors.length, iterations };
+  }
+
+  private groupErrorsByFile(errors: string[]): Map<string, string[]> {
+    const grouped = new Map<string, string[]>();
+    for (const error of errors) {
+      const fileMatch = error.match(/^(.+?)[:(]/);
+      const file = fileMatch ? fileMatch[1] : 'unknown';
+      if (!grouped.has(file)) {
+        grouped.set(file, []);
+      }
+      grouped.get(file)!.push(error);
+    }
+    return grouped;
+  }
+
+  private formatErrorsForLLM(errors: string[]): string {
+    return errors.map((e, i) => `${i + 1}. ${e}`).join('\n');
+  }
+
+  private async runLintCheck(workspaceRoot: string): Promise<string[]> {
+    const errors: string[] = [];
+    
+    // Try TypeScript check
+    const tsConfigPath = path.join(workspaceRoot, 'tsconfig.json');
+    const hasTsConfig = await this.pathExists(tsConfigPath);
+    
+    if (hasTsConfig) {
+      const tsResult = await this.runCommand('npx tsc --noEmit 2>&1', workspaceRoot, 60);
+      if (tsResult.output) {
+        const parsed = this.parseTypeScriptErrors(tsResult.output);
+        errors.push(...parsed);
+      }
+    }
+    
+    // Try ESLint
+    const eslintConfigPath = path.join(workspaceRoot, '.eslintrc.json');
+    const hasEslint = await this.pathExists(eslintConfigPath);
+    
+    if (hasEslint) {
+      const eslintResult = await this.runCommand('npx eslint . --format=compact 2>&1', workspaceRoot, 60);
+      if (eslintResult.output) {
+        const parsed = this.parseESLintErrors(eslintResult.output);
+        errors.push(...parsed);
+      }
+    }
+    
+    // Try npm build
+    const packageJsonPath = path.join(workspaceRoot, 'package.json');
+    const hasPackageJson = await this.pathExists(packageJsonPath);
+    
+    if (hasPackageJson) {
+      const buildResult = await this.runCommand('npm run build 2>&1 || true', workspaceRoot, 120);
+      if (buildResult.output) {
+        const parsed = this.parseBuildErrors(buildResult.output);
+        errors.push(...parsed);
+      }
+    }
+    
+    return errors;
+  }
+
+  private async runCommand(command: string, cwd: string, timeoutSeconds: number): Promise<{ output: string; exitCode: number }> {
+    return new Promise((resolve) => {
+      const isWindows = process.platform === 'win32';
+      const shell = isWindows ? 'cmd.exe' : '/bin/bash';
+      const shellArgs = isWindows ? ['/c', command] : ['-c', command];
+      
+      let output = '';
+      let timedOut = false;
+      
+      const proc = spawn(shell, shellArgs, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      
+      const timer = setTimeout(() => {
+        timedOut = true;
+        proc.kill('SIGTERM');
+      }, timeoutSeconds * 1000);
+      
+      proc.stdout?.on('data', (data: Buffer) => {
+        output += data.toString();
+      });
+      
+      proc.stderr?.on('data', (data: Buffer) => {
+        output += data.toString();
+      });
+      
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ output: output.slice(0, 10000), exitCode: code ?? 0 });
+      });
+      
+      proc.on('error', () => {
+        clearTimeout(timer);
+        resolve({ output, exitCode: -1 });
+      });
+    });
+  }
+
+  private parseTypeScriptErrors(output: string): string[] {
+    const errors: string[] = [];
+    const lines = output.split('\n');
+    
+    for (const line of lines) {
+      // TS Error format: file.ts(line,col): error TS1234: message
+      const match = line.match(/^(.+?)\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
+      if (match) {
+        errors.push(`${match[1]}:${match[2]} - ${match[5]}`);
+      } else if (line.includes('error TS')) {
+        errors.push(line.slice(0, 200));
+      }
+    }
+    
+    return errors;
+  }
+
+  private parseESLintErrors(output: string): string[] {
+    const errors: string[] = [];
+    const lines = output.split('\n');
+    
+    for (const line of lines) {
+      if (line.includes(':') && (line.includes('error') || line.includes('warning'))) {
+        errors.push(line.slice(0, 200));
+      }
+    }
+    
+    return errors;
+  }
+
+  private parseBuildErrors(output: string): string[] {
+    const errors: string[] = [];
+    const lines = output.split('\n');
+    
+    for (const line of lines) {
+      if (line.includes('ERROR') || line.includes('error:') || line.includes('SyntaxError') || line.includes('Module not found')) {
+        errors.push(line.slice(0, 200));
+      }
+    }
+    
+    return errors;
+  }
+
+  private async pathExists(filePath: string): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async stagePreviewEdits(
@@ -1607,12 +2185,17 @@ class KlyrExtensionController {
     await this.persistState();
   }
 
-  private createPipeline(): Pipeline {
+  private createPipeline(ollamaOverrides: Partial<KlyrConfig['ollama']> = {}): Pipeline {
     const config = this.getConfig();
+    const effectiveOllamaConfig = {
+      ...config.ollama,
+      ...ollamaOverrides,
+    };
     const ollamaClient = new HttpOllamaClient({
-      baseUrl: config.ollama.baseUrl,
-      timeoutMs: config.ollama.timeoutMs,
-      maxRetries: config.ollama.maxRetries,
+      baseUrl: effectiveOllamaConfig.baseUrl,
+      timeoutMs: effectiveOllamaConfig.timeoutMs,
+      maxRetries: effectiveOllamaConfig.maxRetries,
+      retryBackoffMs: effectiveOllamaConfig.retryBackoffMs,
     });
     
     // Use LLM-powered planner for better intent classification
@@ -1620,20 +2203,28 @@ class KlyrExtensionController {
     
     return new Pipeline(
       planner,
-      this.createCoder(config),
+      this.createCoder(config, effectiveOllamaConfig),
       new BasicValidator(),
       new FileSystemExecutor(),
-      new InMemoryContextEngine(new OllamaEmbeddingProvider(config.ollama.baseUrl)),
+      new InMemoryContextEngine(new OllamaEmbeddingProvider(effectiveOllamaConfig.baseUrl)),
       this.memory,
       this.logger
     );
   }
 
-  private createCoder(config: KlyrConfig): OllamaCoder {
+  private createCoder(
+    config: KlyrConfig,
+    ollamaOverrides: Partial<KlyrConfig['ollama']> = {}
+  ): OllamaCoder {
+    const effectiveOllamaConfig = {
+      ...config.ollama,
+      ...ollamaOverrides,
+    };
+
     return new OllamaCoder({
-      client: new HttpOllamaClient(config.ollama),
-      model: config.ollama.model,
-      temperature: config.ollama.temperature,
+      client: new HttpOllamaClient(effectiveOllamaConfig),
+      model: effectiveOllamaConfig.model,
+      temperature: effectiveOllamaConfig.temperature,
     });
   }
 
@@ -1767,6 +2358,623 @@ class KlyrExtensionController {
     }
 
     return paths.map((pathValue) => `\`${pathValue}\``).join(', ');
+  }
+
+  private async tryExecutePromptCommands(
+    runtime: RuntimeContext,
+    prompt: string,
+    requestId: number
+  ): Promise<boolean> {
+    const plan = this.buildCommandPlan(prompt);
+    if (!plan) {
+      return false;
+    }
+
+    const commandOnly = this.shouldHandleWithCommandWorkflowOnly(prompt);
+
+    if (requestId !== this.requestSerial) {
+      return true;
+    }
+
+    this.setStatus('executing', `Executing workflow: ${plan.summary}`);
+    this.syncWebview();
+
+    const executed: CommandExecutionResult[] = [];
+    const commandCwd = await this.resolveCommandWorkingDirectory(runtime.workspaceRoot, prompt);
+    const cwdLabel = toRelativePath(runtime.workspaceRoot, commandCwd);
+
+    for (const command of plan.commands) {
+      if (requestId !== this.requestSerial) {
+        return true;
+      }
+
+      this.setStatus('executing', `Running in ${cwdLabel || '.'}: ${command}`);
+      this.syncWebview();
+
+      let run = await this.runShellCommand(command, commandCwd);
+      executed.push(run);
+
+      let recoveryAttempt = 0;
+      while (
+        !run.ok &&
+        this.shouldAttemptAutoFixForCommand(command, run.output) &&
+        recoveryAttempt < 3
+      ) {
+        recoveryAttempt += 1;
+        this.setStatus(
+          'thinking',
+          `Command failed. Auto-fix attempt ${recoveryAttempt}/3 for: ${command}`
+        );
+        this.syncWebview();
+
+        const fixed = await this.attemptAutoFixForFailedCommand(runtime, command, run.output, commandCwd);
+        if (!fixed) {
+          break;
+        }
+
+        this.setStatus('executing', `Retrying command after fix: ${command}`);
+        this.syncWebview();
+        run = await this.runShellCommand(command, commandCwd);
+        executed.push(run);
+      }
+
+      if (!run.ok) {
+        this.appendMessage(
+          'assistant',
+          `## Command failed\n- **Command**: \`${command}\`\n- **Exit code**: ${run.exitCode}\n\n\`\`\`text\n${this.trimExternalKnowledge(run.output, 1800)}\n\`\`\``
+        );
+        this.setStatus('idle', 'Command workflow stopped on error.');
+        return true;
+      }
+    }
+
+    const doneGate = await this.enforceDiagnosticsDoneGate(runtime, commandCwd, requestId);
+    if (!doneGate.ok) {
+      this.appendMessage(
+        'assistant',
+        `## Done gate blocked\n- Remaining errors: ${doneGate.errorCount}\n\n\`\`\`text\n${this.trimExternalKnowledge(doneGate.detail, 2200)}\n\`\`\``
+      );
+      this.setStatus('idle', 'Command workflow paused with unresolved errors.');
+      return true;
+    }
+
+    const summaryLines = executed.map(
+      (entry) => `- \`${entry.command}\`: ${entry.ok ? 'ok' : `failed (${entry.exitCode})`}`
+    );
+
+    this.appendMessage(
+      'assistant',
+      `## Command workflow completed\n- **Scope**: \`${cwdLabel || '.'}\`\n${summaryLines.join('\n')}`
+    );
+    if (!commandOnly) {
+      this.appendMessage(
+        'assistant',
+        'Scaffolding/setup commands completed. Continuing to implement the requested project files and UI.'
+      );
+      this.setStatus('planning', 'Continuing with project implementation.');
+      return false;
+    }
+
+    this.setStatus('idle', 'Command workflow completed.');
+    return true;
+  }
+
+  private shouldHandleWithCommandWorkflowOnly(prompt: string): boolean {
+    const explicitCommands = this.extractInlineCommands(prompt);
+    if (explicitCommands.length > 0) {
+      return true;
+    }
+
+    return !this.requiresProjectImplementation(prompt);
+  }
+
+  private requiresProjectImplementation(prompt: string): boolean {
+    const lower = prompt.toLowerCase();
+
+    const implementationSignals = [
+      'landing page',
+      'homepage',
+      'portfolio',
+      'dashboard',
+      'tailwind',
+      'tailwind css',
+      'hero section',
+      'features section',
+      'faq',
+      'testimonial',
+      'build a',
+      'create a',
+      'make each and everything',
+      'complete project',
+      'full project',
+      'responsive',
+      'ui',
+      'design',
+      'component',
+    ];
+
+    return implementationSignals.some((signal) => lower.includes(signal));
+  }
+
+  private isTimeoutErrorMessage(message: string | undefined): boolean {
+    if (!message) {
+      return false;
+    }
+    return /(timed out|timeout|aborted)/i.test(message);
+  }
+
+  private async resolveCommandWorkingDirectory(
+    workspaceRoot: string,
+    prompt: string
+  ): Promise<string> {
+    const scoped = this.extractScopedFolderFromPrompt(prompt);
+    if (!scoped) {
+      return workspaceRoot;
+    }
+
+    const resolved = path.resolve(workspaceRoot, scoped);
+    try {
+      const stat = await fs.stat(resolved);
+      if (stat.isDirectory()) {
+        return resolved;
+      }
+    } catch {
+      // Ignore missing scoped directory and fallback to root.
+    }
+
+    return workspaceRoot;
+  }
+
+  private extractScopedFolderFromPrompt(prompt: string): string | undefined {
+    const patterns = [
+      /\b(?:in|inside|within)\s+([a-zA-Z0-9._/-]+)\s+(?:folder|directory)\b/i,
+      /\bunder\s+([a-zA-Z0-9._/-]+)\b/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = prompt.match(pattern);
+      const candidate = match?.[1]?.trim();
+      if (!candidate) {
+        continue;
+      }
+      const lower = candidate.toLowerCase();
+      if (['this', 'current', 'workspace', 'root', '.'].includes(lower)) {
+        continue;
+      }
+      return candidate.replace(/^\.\//, '').replace(/^\//, '');
+    }
+
+    return undefined;
+  }
+
+  private buildCommandPlan(prompt: string): CommandPlan | undefined {
+    const lower = prompt.toLowerCase();
+    const explicit = this.extractInlineCommands(prompt);
+    if (explicit.length > 0) {
+      return {
+        summary: 'User-provided command sequence',
+        commands: explicit,
+      };
+    }
+
+    if (/react\s+vite|vite\s+react|create\s+.*vite/i.test(prompt)) {
+      const inRoot = /in\s+(this|current)\s+(folder|root|directory)/i.test(prompt);
+      if (inRoot) {
+        return {
+          summary: 'Create React Vite app in current folder',
+          commands: ['npm create vite@latest . -- --template react', 'npm install', 'npm run build'],
+        };
+      }
+
+      const appName = this.extractProjectName(prompt) ?? 'react-vite-app';
+      return {
+        summary: 'Create React Vite app in subfolder',
+        commands: [
+          `npm create vite@latest ${appName} -- --template react`,
+          `cd ${appName} && npm install`,
+          `cd ${appName} && npm run build`,
+        ],
+      };
+    }
+
+    if (/\bgit\b|\bcommit\b|\bpush\b|\bnpm\b|\byarn\b|\bpnpm\b/i.test(lower)) {
+      const commands: string[] = [];
+      if (/\bcommit\b/i.test(lower) || /\bpush\b/i.test(lower)) {
+        const message = this.extractCommitMessage(prompt) ?? 'chore: update via klyr';
+        commands.push('git add -A');
+        commands.push(`git commit -m "${message.replace(/"/g, '\\"')}"`);
+      }
+      if (/\bpush\b/i.test(lower)) {
+        commands.push('git push');
+      }
+
+      const npmMatches = prompt.match(/(?:npm|pnpm|yarn)\s+[a-zA-Z0-9:@._/-]+(?:\s+[-a-zA-Z0-9@._/:=]+)*/g);
+      if (npmMatches) {
+        commands.unshift(...npmMatches);
+      }
+
+      if (commands.length > 0) {
+        return {
+          summary: 'Run git/npm command workflow',
+          commands,
+        };
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractInlineCommands(prompt: string): string[] {
+    const commandLines = prompt
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => /^(npm|pnpm|yarn|git|npx)\s+/i.test(line));
+
+    const inlineCodeCommands = [...prompt.matchAll(/`((?:npm|pnpm|yarn|git|npx)\s+[^`]+)`/gi)].map(
+      (match) => match[1].trim()
+    );
+
+    return [...new Set([...commandLines, ...inlineCodeCommands])];
+  }
+
+  private extractCommitMessage(prompt: string): string | undefined {
+    const quoted = prompt.match(/commit(?:\s+message)?\s+["']([^"']+)["']/i);
+    if (quoted?.[1]) {
+      return quoted[1].trim();
+    }
+    return undefined;
+  }
+
+  private extractProjectName(prompt: string): string | undefined {
+    const named = prompt.match(/(?:named|called)\s+([a-zA-Z0-9-_]+)/i);
+    if (named?.[1]) {
+      return named[1].trim();
+    }
+    return undefined;
+  }
+
+  private async runShellCommand(command: string, cwd: string): Promise<CommandExecutionResult> {
+    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/bash';
+    const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command];
+
+    return await new Promise<CommandExecutionResult>((resolve) => {
+      const child = spawn(shell, args, {
+        cwd,
+        env: process.env,
+        windowsHide: true,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        child.kill();
+      }, 180000);
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        const output = `${stdout}${stderr}`.trim();
+        resolve({
+          command,
+          ok: code === 0,
+          exitCode: code ?? -1,
+          output,
+        });
+      });
+    });
+  }
+
+  private shouldAttemptAutoFixForCommand(command: string, output: string): boolean {
+    const lowerCommand = command.toLowerCase();
+    const lowerOutput = output.toLowerCase();
+    if (!/(npm|pnpm|yarn)\s+run\s+(build|test|lint)/.test(lowerCommand)) {
+      return false;
+    }
+
+    return /(error|failed|cannot find|ts\d+|eslint|exception)/.test(lowerOutput);
+  }
+
+  private async attemptAutoFixForFailedCommand(
+    runtime: RuntimeContext,
+    command: string,
+    output: string,
+    scopeRoot: string
+  ): Promise<boolean> {
+    const scopeRelative = toRelativePath(runtime.workspaceRoot, scopeRoot) || '.';
+    const fixPrompt = `In ${scopeRelative} folder, fix project files so this command succeeds: ${command}\n\nError output:\n${this.trimExternalKnowledge(output, 3500)}\n\nMake only necessary changes.`;
+
+    const refreshRuntime = await this.buildRuntimeContext();
+    const effectiveRuntime = refreshRuntime ?? runtime;
+    const pipeline = this.createPipeline();
+    const result = await pipeline.execute(
+      {
+        workspaceRoot: effectiveRuntime.workspaceRoot,
+        prompt: fixPrompt,
+        activeFilePath: effectiveRuntime.activeFilePath,
+        selection: effectiveRuntime.selection,
+        modeHint: 'edit',
+        workspaceSummary: effectiveRuntime.workspaceSummary,
+        dependencyAllowlist: effectiveRuntime.dependencyAllowlist,
+        openFiles: effectiveRuntime.openFiles,
+        documents: effectiveRuntime.documents,
+        logger: this.logger,
+      },
+      {
+        maxAttempts: effectiveRuntime.config.execution.maxAttempts,
+        retrievalMaxResults: effectiveRuntime.config.context.retrievalMaxResults,
+        allowNewFiles: true,
+      }
+    );
+
+    if (!result.ok || !result.preview) {
+      return false;
+    }
+
+    const applyResult = await new FileSystemExecutor().apply(
+      result.preview,
+      'accept',
+      effectiveRuntime.workspaceRoot
+    );
+
+    return applyResult.applied > 0 && applyResult.errors.length === 0;
+  }
+
+  private async enforceDiagnosticsDoneGate(
+    runtime: RuntimeContext,
+    scopeRoot: string,
+    requestId: number
+  ): Promise<{ ok: boolean; errorCount: number; detail: string }> {
+    let attempts = 0;
+    while (attempts < 3) {
+      if (requestId !== this.requestSerial) {
+        return { ok: false, errorCount: 1, detail: 'Request cancelled.' };
+      }
+
+      const diagnostics = this.collectWorkspaceDiagnostics(runtime.workspaceRoot, scopeRoot);
+      const errors = diagnostics.filter(
+        (item) => item.diagnostic.severity === vscode.DiagnosticSeverity.Error
+      );
+      if (errors.length === 0) {
+        return { ok: true, errorCount: 0, detail: '' };
+      }
+
+      attempts += 1;
+      this.setStatus('thinking', `Detected ${errors.length} errors. Auto-fix pass ${attempts}/3.`);
+      this.syncWebview();
+
+      const fixPrompt = [
+        `In ${toRelativePath(runtime.workspaceRoot, scopeRoot) || '.'} folder, fix all errors listed below.`,
+        'Do minimal safe edits and preserve behavior.',
+        'Errors:',
+        ...errors.slice(0, 25).map((d) =>
+          `- ${toRelativePath(runtime.workspaceRoot, d.uri.fsPath)}:${d.diagnostic.range.start.line + 1}:${d.diagnostic.range.start.character + 1} ${d.diagnostic.message}`
+        ),
+      ].join('\n');
+
+      const fixed = await this.attemptAutoFixForFailedCommand(runtime, 'diagnostics-fix', fixPrompt, scopeRoot);
+      if (!fixed) {
+        const detail = errors
+          .slice(0, 15)
+          .map(
+            (d) =>
+              `${toRelativePath(runtime.workspaceRoot, d.uri.fsPath)}:${d.diagnostic.range.start.line + 1} ${d.diagnostic.message}`
+          )
+          .join('\n');
+        return { ok: false, errorCount: errors.length, detail };
+      }
+    }
+
+    const finalErrors = this.collectWorkspaceDiagnostics(runtime.workspaceRoot, scopeRoot).filter(
+      (item) => item.diagnostic.severity === vscode.DiagnosticSeverity.Error
+    );
+    const detail = finalErrors
+      .slice(0, 15)
+      .map(
+        (d) =>
+          `${toRelativePath(runtime.workspaceRoot, d.uri.fsPath)}:${d.diagnostic.range.start.line + 1} ${d.diagnostic.message}`
+      )
+      .join('\n');
+    return { ok: finalErrors.length === 0, errorCount: finalErrors.length, detail };
+  }
+
+  private collectWorkspaceDiagnostics(
+    workspaceRoot: string,
+    scopeRoot?: string
+  ): Array<{ uri: vscode.Uri; diagnostic: vscode.Diagnostic }> {
+    const root = path.resolve(workspaceRoot);
+    const scope = scopeRoot ? path.resolve(scopeRoot) : undefined;
+    const all = vscode.languages.getDiagnostics();
+    const collected: Array<{ uri: vscode.Uri; diagnostic: vscode.Diagnostic }> = [];
+
+    for (const [uri, diagnostics] of all) {
+      if (uri.scheme !== 'file') {
+        continue;
+      }
+
+      const filePath = path.resolve(uri.fsPath);
+      if (!filePath.startsWith(root)) {
+        continue;
+      }
+      if (scope && !filePath.startsWith(scope)) {
+        continue;
+      }
+
+      for (const diagnostic of diagnostics) {
+        collected.push({ uri, diagnostic });
+      }
+    }
+
+    return collected;
+  }
+
+  private parseImageAttachments(input: unknown): ChatImageAttachment[] {
+    if (!Array.isArray(input)) {
+      return [];
+    }
+
+    return input
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+      .map((item) => ({
+        id: typeof item.id === 'string' ? item.id : undefined,
+        dataUrl: typeof item.dataUrl === 'string' ? item.dataUrl : '',
+        mimeType: typeof item.mimeType === 'string' ? item.mimeType : 'image/png',
+        name: typeof item.name === 'string' ? item.name : undefined,
+      }))
+      .filter((item) => item.dataUrl.startsWith('data:image/'))
+      .slice(0, 3);
+  }
+
+  private async buildImageAnalysisDocument(
+    prompt: string,
+    images: ChatImageAttachment[],
+    config: KlyrConfig
+  ): Promise<ContextDocument | undefined> {
+    const base64Images = images
+      .map((image) => this.extractBase64ImageData(image.dataUrl))
+      .filter((value): value is string => Boolean(value));
+
+    if (base64Images.length === 0) {
+      return undefined;
+    }
+
+    try {
+      const visionClient = new HttpOllamaClient({
+        baseUrl: config.ollama.baseUrl,
+        timeoutMs: Math.max(config.ollama.timeoutMs, 90000),
+        maxRetries: config.ollama.maxRetries,
+        retryBackoffMs: config.ollama.retryBackoffMs,
+      });
+
+      const response = await visionClient.chat({
+        model: config.ollama.visionModel,
+        temperature: 0,
+        stream: false,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are analyzing coding screenshots. Extract exact error text, stack traces, file paths, line numbers, and actionable debugging clues. Do not invent unreadable text.',
+          },
+          {
+            role: 'user',
+            content: `User prompt: ${prompt}\n\nAnalyze attached screenshot(s) and summarize relevant debugging signals for a coding assistant.`,
+            images: base64Images,
+          },
+        ],
+      });
+
+      const content = response.content.trim();
+      if (!content) {
+        return undefined;
+      }
+
+      return {
+        id: `klyr-image-analysis-${Date.now()}`,
+        uri: 'klyr://attachments/image-analysis',
+        title: 'image-analysis',
+        content,
+        updatedAt: Date.now(),
+        source: 'memory',
+        tags: ['image', 'vision', 'attachment'],
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Image analysis failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return undefined;
+    }
+  }
+
+  private extractBase64ImageData(dataUrl: string): string | undefined {
+    const match = dataUrl.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+    if (!match?.[1]) {
+      return undefined;
+    }
+    return match[1];
+  }
+
+  private enforceCitationPolicy(
+    answer: string,
+    documents: ContextDocument[],
+    strictModeEnabled: boolean
+  ): { ok: boolean; message?: string } {
+    if (!strictModeEnabled) {
+      return { ok: true };
+    }
+
+    const externalUris = documents
+      .map((document) => document.uri)
+      .filter((uri) => /^https?:\/\//i.test(uri) || /^mcp:\/\//i.test(uri));
+
+    if (externalUris.length === 0) {
+      return { ok: true };
+    }
+
+    const hasKnownCitation = externalUris.some((uri) => answer.includes(uri));
+    const hasUrlCitation = /(https?:\/\/[^\s)]+)/i.test(answer);
+
+    if (!hasKnownCitation && !hasUrlCitation) {
+      return {
+        ok: false,
+        message:
+          'Strict citation mode is enabled and this answer used external context without including source URLs.',
+      };
+    }
+
+    return { ok: true };
+  }
+
+  private createGroundingPolicyDocument(references: string[]): ContextDocument {
+    const normalizedRefs = references.slice(0, 12);
+    const sourceList =
+      normalizedRefs.length > 0
+        ? normalizedRefs.map((entry) => `- ${entry}`).join('\n')
+        : '- No external source resolved.';
+
+    return {
+      id: `klyr-grounding-policy-${Date.now()}`,
+      uri: 'klyr://grounding/policy',
+      title: 'klyr-grounding-policy',
+      content: [
+        'Grounding requirements for this response:',
+        '1. Use only facts present in workspace context and retrieved RAG sources.',
+        '2. If an answer is missing from context, explicitly say that information is unavailable.',
+        '3. Do not invent APIs, package names, versions, or file paths.',
+        '4. For external facts, cite the source URL directly in the response.',
+        'External source catalog:',
+        sourceList,
+      ].join('\n'),
+      updatedAt: Date.now(),
+      source: 'memory',
+      tags: ['grounding', 'rag', 'policy'],
+    };
+  }
+
+  private createMcpPolicyDocument(references: string[]): ContextDocument {
+    const lines = references.length > 0 ? references.map((entry) => `- ${entry}`) : ['- none'];
+
+    return {
+      id: `klyr-mcp-policy-${Date.now()}`,
+      uri: 'klyr://mcp/policy',
+      title: 'klyr-mcp-policy',
+      content: [
+        'MCP tool grounding policy:',
+        '1. Prefer MCP tool output when it directly answers the question.',
+        '2. Do not fabricate MCP results.',
+        '3. If MCP output conflicts with workspace facts, mention the conflict explicitly.',
+        'MCP tool calls used:',
+        ...lines,
+      ].join('\n'),
+      updatedAt: Date.now(),
+      source: 'memory',
+      tags: ['mcp', 'policy', 'grounding'],
+    };
   }
 
   private appendMessage(role: UiChatMessage['role'], content: string): string {
@@ -2044,6 +3252,8 @@ class KlyrExtensionController {
     await this.archiveCurrentChatIfNeeded();
     await this.discardStagedEdits();
     this.pendingPreview = undefined;
+      this.pendingDraft = undefined;
+      this.pendingCommands = [];
     this.lastPrompt = undefined;
     this.lastPlan = undefined;
     this.state.messages = [];
@@ -2487,6 +3697,47 @@ class KlyrExtensionController {
   private getConfig(): KlyrConfig {
     const defaults = defaultConfig();
     const config = vscode.workspace.getConfiguration('klyr');
+    const configuredMcpServers = config.get<Array<Record<string, unknown>>>(
+      'mcp.servers',
+      defaults.mcp.servers as unknown as Array<Record<string, unknown>>
+    );
+    const mcpServers = (Array.isArray(configuredMcpServers) ? configuredMcpServers : [])
+      .map((entry) => {
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        const command = typeof entry.command === 'string' ? entry.command.trim() : '';
+        if (!name || !command) {
+          return undefined;
+        }
+
+        return {
+          name,
+          command,
+          args: Array.isArray(entry.args)
+            ? entry.args
+                .map((value) => (typeof value === 'string' ? value : ''))
+                .filter((value) => value.length > 0)
+            : [],
+          cwd: typeof entry.cwd === 'string' && entry.cwd.trim() ? entry.cwd.trim() : undefined,
+          env:
+            entry.env && typeof entry.env === 'object'
+              ? Object.entries(entry.env as Record<string, unknown>).reduce<Record<string, string>>(
+                  (acc, [key, value]) => {
+                    if (typeof value === 'string') {
+                      acc[key] = value;
+                    }
+                    return acc;
+                  },
+                  {}
+                )
+              : undefined,
+          enabled: typeof entry.enabled === 'boolean' ? entry.enabled : true,
+          timeoutMs:
+            typeof entry.timeoutMs === 'number' && Number.isFinite(entry.timeoutMs)
+              ? entry.timeoutMs
+              : 10000,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
     return {
       ...defaults,
@@ -2496,6 +3747,7 @@ class KlyrExtensionController {
         model:
           this.selectedModelOverride ??
           config.get<string>('ollama.model', defaults.ollama.model),
+        visionModel: config.get<string>('ollama.visionModel', defaults.ollama.visionModel),
         temperature: config.get<number>('ollama.temperature', defaults.ollama.temperature),
         timeoutMs: config.get<number>('ollama.timeoutMs', defaults.ollama.timeoutMs),
         maxRetries: config.get<number>('ollama.maxRetries', defaults.ollama.maxRetries),
@@ -2533,6 +3785,20 @@ class KlyrExtensionController {
         maxSuffixChars: config.get<number>(
           'inline.maxSuffixChars',
           defaults.inline.maxSuffixChars
+        ),
+      },
+      mcp: {
+        ...defaults.mcp,
+        enabled: config.get<boolean>('mcp.enabled', defaults.mcp.enabled),
+        servers: mcpServers,
+      },
+      rag: {
+        ...defaults.rag,
+        strictCitations: config.get<boolean>('rag.strictCitations', defaults.rag.strictCitations),
+        trustedDomains: config.get<string[]>('rag.trustedDomains', defaults.rag.trustedDomains),
+        trustedGitHubOrgs: config.get<string[]>(
+          'rag.trustedGitHubOrgs',
+          defaults.rag.trustedGitHubOrgs
         ),
       },
     };

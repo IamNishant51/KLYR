@@ -8,6 +8,7 @@ export interface OllamaClientOptions {
 export interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  images?: string[];
 }
 
 export interface OllamaChatRequest {
@@ -94,15 +95,17 @@ export class HttpOllamaClient implements OllamaClient {
   ): Promise<OllamaChatResponse> {
     let attempt = 0;
     let lastError: unknown;
+    let lastTimeoutMs = this.options.timeoutMs;
 
     while (attempt <= this.options.maxRetries) {
       try {
-        return await this.executeRequest(request, stream, onChunk);
+        const timeoutMultiplier = 1 + attempt;
+        const effectiveTimeoutMs = Math.min(this.options.timeoutMs * timeoutMultiplier, 12 * 60 * 1000);
+        lastTimeoutMs = effectiveTimeoutMs;
+        return await this.executeRequest(request, stream, onChunk, effectiveTimeoutMs);
       } catch (error) {
         lastError = error;
-        if (this.isAbortOrTimeoutError(error)) {
-          break;
-        }
+
         attempt += 1;
 
         if (attempt > this.options.maxRetries) {
@@ -113,16 +116,25 @@ export class HttpOllamaClient implements OllamaClient {
       }
     }
 
+    if (this.isAbortOrTimeoutError(lastError)) {
+      const seconds = Math.max(1, Math.round(lastTimeoutMs / 1000));
+      throw new Error(
+        `Model response timed out after ${seconds}s across retries. Increase klyr.ollama.timeoutMs or use a smaller/faster model.`
+      );
+    }
+
     throw lastError ?? new Error('Ollama request failed.');
   }
 
   private async executeRequest(
     request: OllamaChatRequest,
     stream: boolean,
-    onChunk?: OllamaStreamHandler
+    onChunk?: OllamaStreamHandler,
+    timeoutMs?: number
   ): Promise<OllamaChatResponse> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+    const effectiveTimeoutMs = timeoutMs ?? this.options.timeoutMs;
+    const timeout = setTimeout(() => controller.abort(), effectiveTimeoutMs);
 
     try {
       const response = await fetch(`${this.options.baseUrl}/api/chat`, {
@@ -225,7 +237,7 @@ export class HttpOllamaClient implements OllamaClient {
       return { content: lastContent, done: true };
     } catch (error) {
       if (this.isAbortOrTimeoutError(error)) {
-        const seconds = Math.max(1, Math.round(this.options.timeoutMs / 1000));
+        const seconds = Math.max(1, Math.round(effectiveTimeoutMs / 1000));
         throw new Error(
           `Model response timed out after ${seconds}s. Increase klyr.ollama.timeoutMs or use a smaller/faster model.`
         );

@@ -26,5 +26,15 @@ export declare class OllamaCoder implements Coder {
     private stripCodeFences;
     private trimText;
     private shouldAttemptRepair;
+    private validateAndCorrectDraft;
+    private correctPackageJson;
+    private correctViteConfig;
+    private correctMainJsx;
+    private getPackageJsonTemplate;
+    private getViteConfigTemplate;
+    private getMainJsxTemplate;
+    private getAppJsxTemplate;
+    private getIndexCssTemplate;
+    private getAppCssTemplate;
     private repairDraftPayload;
 }

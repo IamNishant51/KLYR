@@ -8,6 +8,7 @@ import React, {
 import ChatPanel from './components/ChatPanel';
 import { buildGhostSuggestion, deriveUiPhase, isBusyPhase } from './lib/chat';
 import type {
+  ChatImageAttachment,
   ChatMessage,
   ContextReference,
   DiffChange,
@@ -43,6 +44,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('qwen2.5-coder');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [attachments, setAttachments] = useState<ChatImageAttachment[]>([]);
   const [extensionStatus, setExtensionStatus] = useState<ExtensionStatus>('idle');
   const [statusDetail, setStatusDetail] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -146,14 +148,19 @@ function App() {
 
   const handleSendMessage = () => {
     const prompt = inputValue.trim();
-    if (!prompt || busy) {
+    if ((!prompt && attachments.length === 0) || busy) {
       return;
     }
+
+    const attachmentHint =
+      attachments.length > 0
+        ? `\n\n[attached image${attachments.length === 1 ? '' : 's'}: ${attachments.length}]`
+        : '';
 
     const optimisticMessage: ChatMessage = {
       id: `${Date.now()}`,
       role: 'user',
-      content: prompt,
+      content: `${prompt}${attachmentHint}`.trim(),
       createdAt: Date.now(),
     };
 
@@ -165,6 +172,7 @@ function App() {
     });
     lastThinkingKeyRef.current = '';
     setInputValue('');
+    setAttachments([]);
 
     const vscode = vscodeRef.current;
     if (vscode) {
@@ -173,10 +181,19 @@ function App() {
         payload: {
           prompt,
           modeHint: chatMode === 'agent' ? 'edit' : 'chat',
+          images: attachments,
         },
         config: { selectedModel },
       });
     }
+  };
+
+  const handleAddImage = (attachment: ChatImageAttachment) => {
+    setAttachments((current) => [...current, attachment].slice(-3));
+  };
+
+  const handleRemoveImage = (id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
   };
 
   const handleModelChange = (newModel: string) => {
@@ -271,6 +288,9 @@ function App() {
           thinkingTrace={thinkingTrace}
           inputValue={inputValue}
           onInputChange={setInputValue}
+          attachments={attachments}
+          onAddImage={handleAddImage}
+          onRemoveImage={handleRemoveImage}
           selectedModel={selectedModel}
           availableModels={availableModels}
           onModelChange={handleModelChange}
