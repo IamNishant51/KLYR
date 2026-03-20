@@ -7,6 +7,8 @@ import type {
   InlineCompletionInput,
   CommandStep,
 } from './coder';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { OllamaClient } from '../llm/ollamaClient';
 import {
   CHAT_SYSTEM_PROMPT,
@@ -73,7 +75,10 @@ export class OllamaCoder implements Coder {
     const parsed = this.parseResponse(response.content);
     
     // ALWAYS validate and correct common mistakes in file content
-    const validated = this.validateAndCorrectDraft(parsed, input.prompt);
+    const validated = await this.normalizeDraftOperationsForWorkspace(
+      this.validateAndCorrectDraft(parsed, input.prompt),
+      input.context.workspace.root
+    );
     
     if (!this.shouldAttemptRepair(validated, response.content)) {
       return validated;
@@ -82,13 +87,39 @@ export class OllamaCoder implements Coder {
     try {
       const repaired = await this.repairDraftPayload(input, response.content);
       if (repaired.changes.length > 0) {
-        return repaired;
+        return await this.normalizeDraftOperationsForWorkspace(
+          repaired,
+          input.context.workspace.root
+        );
       }
     } catch {
       // Keep original parsed response if repair fails.
     }
 
     return validated;
+  }
+
+  private async normalizeDraftOperationsForWorkspace(
+    draft: CodeDraft,
+    workspaceRoot: string
+  ): Promise<CodeDraft> {
+    for (const change of draft.changes) {
+      if (change.operation !== 'create') {
+        continue;
+      }
+
+      const absolutePath = path.resolve(workspaceRoot, change.path);
+      try {
+        const stat = await fs.stat(absolutePath);
+        if (stat.isFile()) {
+          change.operation = 'update';
+        }
+      } catch {
+        // File does not exist yet, keep create operation.
+      }
+    }
+
+    return draft;
   }
 
   async answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer> {
@@ -475,9 +506,8 @@ If optimizing, make sure proposedContent includes ALL original code plus your im
       return draft;
     }
 
-    // Extract target folder from prompt
-    const folderMatch = promptLower.match(/\b(?:in|to|inside)\s+([a-zA-Z0-9_-]+)\s*(?:folder)?/i);
-    const targetFolder = folderMatch ? folderMatch[1] + '/' : '';
+    const { targetFolder, projectName } = this.extractProjectScaffoldHints(prompt);
+    const shouldNormalizePronounPrefixes = targetFolder.length === 0;
     
     // Extract user name if mentioned
     const nameMatch = prompt.match(/\bmy name is ([A-Za-z]+)/i);
@@ -486,6 +516,16 @@ If optimizing, make sure proposedContent includes ALL original code plus your im
     // Map of file paths that need correction
     const corrections: Map<string, string> = new Map();
     
+    // Normalize obvious accidental prompt-pronoun path prefixes like "it/".
+    if (shouldNormalizePronounPrefixes) {
+      for (const change of draft.changes) {
+        if (!change.path) {
+          continue;
+        }
+        change.path = this.stripAccidentalPronounPrefix(change.path);
+      }
+    }
+
     // Find files that need validation
     for (const change of draft.changes) {
       const path = change.path || '';
@@ -493,7 +533,7 @@ If optimizing, make sure proposedContent includes ALL original code plus your im
       
       // Validate package.json
       if (path.endsWith('package.json')) {
-        const corrected = this.correctPackageJson(content, targetFolder.replace('/', '') || 'myapp');
+        const corrected = this.correctPackageJson(content, projectName || 'myapp');
         if (corrected !== content) {
           corrections.set(path, corrected);
         }
@@ -847,6 +887,49 @@ main {
 `;
   }
 
+  private extractProjectScaffoldHints(prompt: string): { targetFolder: string; projectName: string } {
+    const stopwords = new Set([
+      'it',
+      'this',
+      'that',
+      'there',
+      'here',
+      'current',
+      'workspace',
+      'root',
+      'project',
+      'app',
+      'folder',
+      'directory',
+    ]);
+
+    const nameMatch = prompt.match(
+      /(?:named|called|name\s+it(?:\s+as)?)\s+([A-Za-z][A-Za-z0-9_-]{0,80})/i
+    );
+    const projectName = nameMatch?.[1] ?? '';
+
+    const explicitFolderMatch = prompt.match(
+      /\b(?:in|inside|within|to|into)\s+([A-Za-z][A-Za-z0-9_-]{0,80})\s+(?:folder|directory)\b/i
+    );
+    const explicitFolder = explicitFolderMatch?.[1]?.trim();
+
+    if (!explicitFolder) {
+      return { targetFolder: '', projectName };
+    }
+
+    const lower = explicitFolder.toLowerCase();
+    if (stopwords.has(lower)) {
+      return { targetFolder: '', projectName };
+    }
+
+    return { targetFolder: `${explicitFolder}/`, projectName };
+  }
+
+  private stripAccidentalPronounPrefix(pathValue: string): string {
+    const normalized = pathValue.replace(/\\/g, '/');
+    return normalized.replace(/^(?:it|this|that|there|here)\//i, '');
+  }
+
   private async repairDraftPayload(input: CoderInput, raw: string): Promise<CodeDraft> {
     const trimmed = raw.trim();
     
@@ -860,9 +943,7 @@ main {
     if (isProjectCreation) {
       console.log('[KLYR] Detected project creation request, synthesizing full project...');
       
-      // Extract target folder from prompt
-      const folderMatch = promptLower.match(/\b(?:in|to|inside)\s+([a-zA-Z0-9_-]+)\s*(?:folder)?/i);
-      const targetFolder = folderMatch ? folderMatch[1] + '/' : '';
+      const { targetFolder, projectName } = this.extractProjectScaffoldHints(input.prompt);
       
       // Create a complete React + Vite project
       const reactProjectFiles: DraftFileChange[] = [
@@ -870,7 +951,7 @@ main {
           path: targetFolder + 'package.json',
           operation: 'create' as const,
           proposedContent: `{
-  "name": "${targetFolder.replace('/', '') || 'myapp'}",
+  "name": "${projectName || 'myapp'}",
   "private": true,
   "version": "0.0.0",
   "type": "module",

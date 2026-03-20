@@ -12,6 +12,7 @@ export declare class OllamaCoder implements Coder {
     private lastContextFile;
     constructor(options: OllamaCoderOptions);
     generate(input: CoderInput): Promise<CodeDraft>;
+    private normalizeDraftOperationsForWorkspace;
     answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer>;
     completeInline(input: InlineCompletionInput): Promise<string>;
     private buildEditSystemPrompt;
@@ -36,5 +37,7 @@ export declare class OllamaCoder implements Coder {
     private getAppJsxTemplate;
     private getIndexCssTemplate;
     private getAppCssTemplate;
+    private extractProjectScaffoldHints;
+    private stripAccidentalPronounPrefix;
     private repairDraftPayload;
 }

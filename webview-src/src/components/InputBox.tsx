@@ -1,5 +1,4 @@
 import React, { memo, useEffect, useRef } from 'react';
-import { phaseLabel } from '../lib/chat';
 import type { ChatImageAttachment, UiPhase } from '../types';
 import type { PanelLayoutMode } from '../App';
 
@@ -244,10 +243,10 @@ function InputBox({
 
         <div className="mt-2 px-1 text-left text-xs" style={{ color: 'var(--k-muted)' }}>
           <span className="hidden sm:inline">
-            {busy ? `${phaseLabel(phase)}...` : 'Enter to send, Shift+Enter for new line'}
+            {busy ? 'Generating in progress. Use stop to cancel.' : 'Enter to send, Shift+Enter for new line'}
           </span>
           <span className="sm:hidden">
-            {busy ? `${phaseLabel(phase)}...` : 'Enter to send'}
+            {busy ? 'Generating...' : 'Enter to send'}
           </span>
         </div>
       </div>

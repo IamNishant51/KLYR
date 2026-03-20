@@ -547,7 +547,12 @@ export class Pipeline {
     for (const pattern of patterns) {
       const match = prompt.match(pattern);
       const candidate = match?.[1]?.trim();
-      if (candidate && !['a', 'an', 'the', 'new', 'folder'].includes(candidate.toLowerCase())) {
+      if (
+        candidate &&
+        !['a', 'an', 'the', 'new', 'folder', 'it', 'this', 'that', 'there', 'here'].includes(
+          candidate.toLowerCase()
+        )
+      ) {
         return candidate.replace(/[./\\]+$/, ''); // Remove trailing slashes
       }
     }

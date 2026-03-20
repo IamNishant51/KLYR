@@ -27,6 +27,9 @@ export declare class BasicValidator implements Validator {
     private validateImport;
     private resolveLocalModule;
     private loadDependencyAllowlist;
+    private buildDraftDependencyMap;
+    private buildDraftPlannedFileSet;
+    private mergeDraftDependencies;
     private loadScopedDependencyAllowlist;
     private detectUnsafePatterns;
     private scriptKindForPath;

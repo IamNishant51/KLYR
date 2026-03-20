@@ -34,6 +34,8 @@ export class BasicValidator implements Validator {
 
     const dependencyAllowlist = await this.loadDependencyAllowlist(input.workspaceRoot);
     const packageAllowlistCache = new Map<string, Set<string>>();
+    const draftDependencyMap = this.buildDraftDependencyMap(input.draft.changes, input.workspaceRoot);
+    const draftPlannedFiles = this.buildDraftPlannedFileSet(input.draft.changes, input.workspaceRoot);
     const allowedPaths = new Set(
       (input.allowedRelativePaths ?? []).map((value) => this.normalizeRelativePath(value))
     );
@@ -46,6 +48,8 @@ export class BasicValidator implements Validator {
           input.workspaceRoot,
           dependencyAllowlist,
           packageAllowlistCache,
+          draftDependencyMap,
+          draftPlannedFiles,
           allowedPaths,
           input.allowNewFiles ?? true
         ))
@@ -63,6 +67,8 @@ export class BasicValidator implements Validator {
     workspaceRoot: string,
     dependencyAllowlist: Set<string>,
     packageAllowlistCache: Map<string, Set<string>>,
+    draftDependencyMap: Map<string, Set<string>>,
+    draftPlannedFiles: Set<string>,
     allowedPaths: Set<string>,
     allowNewFiles: boolean
   ): Promise<ValidationError[]> {
@@ -139,11 +145,17 @@ export class BasicValidator implements Validator {
 
     const scriptKind = this.scriptKindForPath(absolutePath);
     if (scriptKind !== undefined) {
-      const scopedDependencyAllowlist = await this.loadScopedDependencyAllowlist(
+      const scopedDependencyAllowlistBase = await this.loadScopedDependencyAllowlist(
         absolutePath,
         workspaceRoot,
         dependencyAllowlist,
         packageAllowlistCache
+      );
+      const scopedDependencyAllowlist = this.mergeDraftDependencies(
+        absolutePath,
+        workspaceRoot,
+        scopedDependencyAllowlistBase,
+        draftDependencyMap
       );
 
       const diagnostics = this.parseDiagnostics(absolutePath, proposedContent, scriptKind);
@@ -161,7 +173,8 @@ export class BasicValidator implements Validator {
           moduleName,
           absolutePath,
           workspaceRoot,
-          scopedDependencyAllowlist
+          scopedDependencyAllowlist,
+          draftPlannedFiles
         );
         if (importError) {
           errors.push(importError);
@@ -296,10 +309,16 @@ export class BasicValidator implements Validator {
     moduleName: string,
     sourceFilePath: string,
     workspaceRoot: string,
-    dependencyAllowlist: Set<string>
+    dependencyAllowlist: Set<string>,
+    draftPlannedFiles: Set<string>
   ): Promise<ValidationError | null> {
     if (moduleName.startsWith('.')) {
-      const resolved = await this.resolveLocalModule(moduleName, sourceFilePath, workspaceRoot);
+      const resolved = await this.resolveLocalModule(
+        moduleName,
+        sourceFilePath,
+        workspaceRoot,
+        draftPlannedFiles
+      );
       if (!resolved) {
         return {
           code: 'MISSING_LOCAL_IMPORT',
@@ -329,7 +348,8 @@ export class BasicValidator implements Validator {
   private async resolveLocalModule(
     moduleName: string,
     sourceFilePath: string,
-    workspaceRoot: string
+    workspaceRoot: string,
+    draftPlannedFiles: Set<string>
   ): Promise<boolean> {
     const sourceDir = path.dirname(sourceFilePath);
     const rawTarget = path.resolve(sourceDir, moduleName);
@@ -351,6 +371,10 @@ export class BasicValidator implements Validator {
     for (const candidate of candidates) {
       if (!this.isWithinWorkspace(candidate, workspaceRoot)) {
         continue;
+      }
+
+      if (draftPlannedFiles.has(path.resolve(candidate))) {
+        return true;
       }
 
       try {
@@ -396,6 +420,93 @@ export class BasicValidator implements Validator {
     }
 
     return allowlist;
+  }
+
+  private buildDraftDependencyMap(
+    changes: DraftFileChange[],
+    workspaceRoot: string
+  ): Map<string, Set<string>> {
+    const map = new Map<string, Set<string>>();
+
+    for (const change of changes) {
+      const normalizedPath = this.normalizeRelativePath(change.path).toLowerCase();
+      if (!normalizedPath.endsWith('package.json')) {
+        continue;
+      }
+
+      const content = change.proposedContent ?? '';
+      if (!content.trim()) {
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(content) as {
+          dependencies?: Record<string, string>;
+          devDependencies?: Record<string, string>;
+          peerDependencies?: Record<string, string>;
+        };
+        const deps = new Set<string>();
+        for (const section of [parsed.dependencies, parsed.devDependencies, parsed.peerDependencies]) {
+          if (!section) {
+            continue;
+          }
+          for (const dep of Object.keys(section)) {
+            deps.add(dep);
+          }
+        }
+
+        const absolutePath = path.resolve(workspaceRoot, change.path);
+        map.set(path.resolve(absolutePath), deps);
+      } catch {
+        // Ignore invalid package.json drafts during dependency merge.
+      }
+    }
+
+    return map;
+  }
+
+  private buildDraftPlannedFileSet(changes: DraftFileChange[], workspaceRoot: string): Set<string> {
+    const set = new Set<string>();
+    for (const change of changes) {
+      if (change.operation === 'delete') {
+        continue;
+      }
+      set.add(path.resolve(workspaceRoot, change.path));
+    }
+    return set;
+  }
+
+  private mergeDraftDependencies(
+    sourceFilePath: string,
+    workspaceRoot: string,
+    baseAllowlist: Set<string>,
+    draftDependencyMap: Map<string, Set<string>>
+  ): Set<string> {
+    if (draftDependencyMap.size === 0) {
+      return baseAllowlist;
+    }
+
+    const merged = new Set<string>(baseAllowlist);
+    const rootNormalized = path.resolve(workspaceRoot);
+    let currentDir = path.dirname(path.resolve(sourceFilePath));
+
+    while (currentDir.startsWith(rootNormalized)) {
+      const packageJsonPath = path.resolve(path.join(currentDir, 'package.json'));
+      const draftDeps = draftDependencyMap.get(packageJsonPath);
+      if (draftDeps) {
+        for (const dep of draftDeps) {
+          merged.add(dep);
+        }
+      }
+
+      const parent = path.dirname(currentDir);
+      if (parent === currentDir) {
+        break;
+      }
+      currentDir = parent;
+    }
+
+    return merged;
   }
 
   private async loadScopedDependencyAllowlist(

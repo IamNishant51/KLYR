@@ -75,6 +75,7 @@ interface ChatImageAttachment {
 interface CommandPlan {
   summary: string;
   commands: string[];
+  targetDirectory?: string;
 }
 
 interface CommandExecutionResult {
@@ -82,6 +83,11 @@ interface CommandExecutionResult {
   ok: boolean;
   exitCode: number;
   output: string;
+}
+
+interface CommandWorkflowResult {
+  handled: boolean;
+  continuationRoot?: string;
 }
 
 const SESSION_STATE_KEY = 'klyr.chatSession';
@@ -633,7 +639,8 @@ class KlyrExtensionController {
   private selectedModelOverride?: string;
   private requestSerial = 0;
   private chatHistory: ChatHistoryEntry[];
-  private workspaceIndexCache: { index: WorkspaceIndex; timestamp: number } | null = null;
+  private workspaceIndexCache: { root: string; index: WorkspaceIndex; timestamp: number } | null =
+    null;
   private readonly INDEX_CACHE_TTL_MS = 5 * 60 * 1000;
   private lastUiUpdate = 0;
   private readonly UI_UPDATE_THROTTLE_MS = 50;
@@ -1137,7 +1144,7 @@ class KlyrExtensionController {
     modeHint: PlanMode,
     images: ChatImageAttachment[] = []
   ): Promise<void> {
-    const runtime = await this.buildRuntimeContext();
+    let runtime = await this.buildRuntimeContext();
     if (!runtime) {
       this.appendMessage(
         'assistant',
@@ -1165,11 +1172,18 @@ class KlyrExtensionController {
     this.setStatus('planning', 'Preparing plan from current workspace context.');
     this.syncWebview();
 
-    const commandHandled = await this.tryExecutePromptCommands(runtime, userPrompt, requestId);
-    if (commandHandled) {
+    const commandResult = await this.tryExecutePromptCommands(runtime, userPrompt, requestId);
+    if (commandResult.handled) {
       await this.persistState();
       this.syncWebview();
       return;
+    }
+
+    if (commandResult.continuationRoot) {
+      const scopedRuntime = await this.buildRuntimeContext(commandResult.continuationRoot);
+      if (scopedRuntime) {
+        runtime = scopedRuntime;
+      }
     }
 
     let documentsForPipeline = runtime.documents;
@@ -2228,8 +2242,10 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     });
   }
 
-  private async buildRuntimeContext(): Promise<RuntimeContext | undefined> {
-    const workspaceRoot = getWorkspaceRoot();
+  private async buildRuntimeContext(
+    workspaceRootOverride?: string
+  ): Promise<RuntimeContext | undefined> {
+    const workspaceRoot = workspaceRootOverride ?? getWorkspaceRoot();
     if (!workspaceRoot) {
       return undefined;
     }
@@ -2238,26 +2254,33 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     let workspaceIndex: WorkspaceIndex;
     if (
       this.workspaceIndexCache &&
+      this.workspaceIndexCache.root === workspaceRoot &&
       Date.now() - this.workspaceIndexCache.timestamp < this.INDEX_CACHE_TTL_MS
     ) {
       workspaceIndex = this.workspaceIndexCache.index;
     } else {
       workspaceIndex = await indexWorkspace(workspaceRoot);
       this.workspaceIndexCache = {
+        root: workspaceRoot,
         index: workspaceIndex,
         timestamp: Date.now(),
       };
     }
     const activeEditor = vscode.window.activeTextEditor;
-    const activeFilePath =
+    const candidateActiveFilePath =
       activeEditor?.document.uri.scheme === 'file' ? activeEditor.document.uri.fsPath : undefined;
+    const activeFilePath =
+      candidateActiveFilePath && this.isWithinWorkspace(candidateActiveFilePath, workspaceRoot)
+        ? candidateActiveFilePath
+        : undefined;
     const selection =
       activeEditor && !activeEditor.selection.isEmpty
         ? activeEditor.document.getText(activeEditor.selection).slice(0, 4000)
         : undefined;
     const openFiles = vscode.workspace.textDocuments
       .filter((document) => document.uri.scheme === 'file' && !document.isUntitled)
-      .map((document) => document.uri.fsPath);
+      .map((document) => document.uri.fsPath)
+      .filter((filePath) => this.isWithinWorkspace(filePath, workspaceRoot));
 
     const fileDocs = await readWorkspaceDocuments(workspaceIndex, {
       maxFiles: config.context.maxFiles,
@@ -2364,16 +2387,16 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     runtime: RuntimeContext,
     prompt: string,
     requestId: number
-  ): Promise<boolean> {
+  ): Promise<CommandWorkflowResult> {
     const plan = this.buildCommandPlan(prompt);
     if (!plan) {
-      return false;
+      return { handled: false };
     }
 
     const commandOnly = this.shouldHandleWithCommandWorkflowOnly(prompt);
 
     if (requestId !== this.requestSerial) {
-      return true;
+      return { handled: true };
     }
 
     this.setStatus('executing', `Executing workflow: ${plan.summary}`);
@@ -2385,7 +2408,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
 
     for (const command of plan.commands) {
       if (requestId !== this.requestSerial) {
-        return true;
+        return { handled: true };
       }
 
       this.setStatus('executing', `Running in ${cwdLabel || '.'}: ${command}`);
@@ -2424,7 +2447,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
           `## Command failed\n- **Command**: \`${command}\`\n- **Exit code**: ${run.exitCode}\n\n\`\`\`text\n${this.trimExternalKnowledge(run.output, 1800)}\n\`\`\``
         );
         this.setStatus('idle', 'Command workflow stopped on error.');
-        return true;
+        return { handled: true };
       }
     }
 
@@ -2435,7 +2458,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
         `## Done gate blocked\n- Remaining errors: ${doneGate.errorCount}\n\n\`\`\`text\n${this.trimExternalKnowledge(doneGate.detail, 2200)}\n\`\`\``
       );
       this.setStatus('idle', 'Command workflow paused with unresolved errors.');
-      return true;
+      return { handled: true };
     }
 
     const summaryLines = executed.map(
@@ -2452,20 +2475,30 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
         'Scaffolding/setup commands completed. Continuing to implement the requested project files and UI.'
       );
       this.setStatus('planning', 'Continuing with project implementation.');
-      return false;
+      const targetFromPlan = plan.targetDirectory
+        ? path.resolve(commandCwd, plan.targetDirectory)
+        : undefined;
+      const continuationRoot =
+        targetFromPlan && (await this.pathExists(targetFromPlan))
+          ? targetFromPlan
+          : commandCwd !== runtime.workspaceRoot
+            ? commandCwd
+            : undefined;
+      return { handled: false, continuationRoot };
     }
 
     this.setStatus('idle', 'Command workflow completed.');
-    return true;
+    return { handled: true };
   }
 
   private shouldHandleWithCommandWorkflowOnly(prompt: string): boolean {
-    const explicitCommands = this.extractInlineCommands(prompt);
-    if (explicitCommands.length > 0) {
-      return true;
+    const needsImplementation = this.requiresProjectImplementation(prompt);
+    if (needsImplementation) {
+      return false;
     }
 
-    return !this.requiresProjectImplementation(prompt);
+    const explicitCommands = this.extractInlineCommands(prompt);
+    return explicitCommands.length > 0 || !needsImplementation;
   }
 
   private requiresProjectImplementation(prompt: string): boolean {
@@ -2574,6 +2607,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
           `cd ${appName} && npm install`,
           `cd ${appName} && npm run build`,
         ],
+        targetDirectory: appName,
       };
     }
 
@@ -2608,7 +2642,8 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     const commandLines = prompt
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => /^(npm|pnpm|yarn|git|npx)\s+/i.test(line));
+      .filter((line) => /^(npm|pnpm|yarn|git|npx)\s+/i.test(line))
+      .filter((line) => !/:\s*(ok|failed|error)\b/i.test(line));
 
     const inlineCodeCommands = [...prompt.matchAll(/`((?:npm|pnpm|yarn|git|npx)\s+[^`]+)`/gi)].map(
       (match) => match[1].trim()
@@ -2626,11 +2661,48 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
   }
 
   private extractProjectName(prompt: string): string | undefined {
-    const named = prompt.match(/(?:named|called)\s+([a-zA-Z0-9-_]+)/i);
+    const named = prompt.match(/(?:named|called|name\s+it\s+as|name\s+it)\s+([a-zA-Z0-9-_]+)/i);
     if (named?.[1]) {
       return named[1].trim();
     }
+
+    const lower = prompt.toLowerCase();
+    const personNameMatch = prompt.match(
+      /(?:developer\s+name\s+is|name\s+is)\s+([A-Za-z]+(?:\s+[A-Za-z]+){0,2})/i
+    );
+    const personSlug = personNameMatch ? this.toKebabCase(personNameMatch[1]) : '';
+
+    const brandNameMatch = prompt.match(
+      /(?:named|name\s+is|for)\s+([A-Za-z][A-Za-z0-9-]{1,80})(?:\s+ai|\s+agency)?/i
+    );
+    const brandSlug = brandNameMatch ? this.toKebabCase(brandNameMatch[1]) : '';
+
+    if (lower.includes('portfolio')) {
+      return personSlug ? `${personSlug}-portfolio` : 'portfolio-website';
+    }
+
+    if (lower.includes('landing page')) {
+      if (brandSlug && !['landing', 'page', 'ai', 'agency'].includes(brandSlug)) {
+        return `${brandSlug}-landing-page`;
+      }
+      return 'landing-page';
+    }
+
+    if (lower.includes('dashboard')) {
+      return personSlug ? `${personSlug}-dashboard` : 'dashboard-app';
+    }
+
     return undefined;
+  }
+
+  private toKebabCase(value: string): string {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .replace(/[\s_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
   }
 
   private async runShellCommand(command: string, cwd: string): Promise<CommandExecutionResult> {
