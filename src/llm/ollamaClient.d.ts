@@ -3,6 +3,8 @@ export interface OllamaClientOptions {
     timeoutMs: number;
     maxRetries: number;
     retryBackoffMs?: number;
+    numParallel?: number;
+    numCtx?: number;
 }
 export interface OllamaChatMessage {
     role: 'system' | 'user' | 'assistant';
@@ -14,10 +16,15 @@ export interface OllamaChatRequest {
     messages: OllamaChatMessage[];
     temperature: number;
     stream: boolean;
+    options?: {
+        num_parallel?: number;
+        num_ctx?: number;
+    };
 }
 export interface OllamaChatResponse {
     content: string;
     done: boolean;
+    thinking?: string;
 }
 export interface OllamaModel {
     name: string;
@@ -39,6 +46,7 @@ export declare class HttpOllamaClient implements OllamaClient {
     chat(request: OllamaChatRequest): Promise<OllamaChatResponse>;
     chatStream(request: OllamaChatRequest, onChunk: OllamaStreamHandler): Promise<void>;
     listModels(): Promise<OllamaModelsResponse>;
+    private enrichRequest;
     private requestWithRetry;
     private executeRequest;
     private isAbortOrTimeoutError;

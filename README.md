@@ -1,4 +1,4 @@
-# Local Toolsmith Agent (for Ollama Agent Extension)
+# NAMI - Neural Assistance For Machine Intelligence
 
 Maintainer: NISHANT
 

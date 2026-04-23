@@ -195,7 +195,7 @@ suite('Planner', () => {
 suite('Coder', () => {
   test('noop coder returns no changes', async () => {
     const coder = new NoopCoder();
-    const draft = await coder.generate({
+    const response = await coder.generate({
       prompt: 'test',
       plan: {
         intent: 'test',
@@ -222,8 +222,13 @@ suite('Coder', () => {
       },
       deterministic: true,
     });
-    assert.strictEqual(draft.changes.length, 0);
-    assert.strictEqual(draft.summary, 'No changes generated.');
+    assert.strictEqual(response.type, 'draft');
+    if (response.type !== 'draft') {
+      assert.fail('Expected draft response');
+    }
+
+    assert.strictEqual(response.draft.changes.length, 0);
+    assert.strictEqual(response.draft.summary, 'No changes generated.');
   });
 });
 

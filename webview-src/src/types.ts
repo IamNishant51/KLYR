@@ -54,11 +54,15 @@ export type ExtensionStatus =
 
 export type UiPhase =
   | 'idle'
+  | 'planning'
+  | 'retrieving'
   | 'thinking'
   | 'generating'
   | 'validating'
-  | 'ready'
   | 'executing'
+  | 'reading'
+  | 'review'
+  | 'ready'
   | 'error';
 
 export type InspectorTab = 'ghost' | 'plan' | 'context' | 'diff';

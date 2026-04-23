@@ -1,4 +1,8 @@
-import React, { memo } from 'react';
+import React, { memo, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import 'highlight.js/styles/github-dark.css';
 
 interface MarkdownTextProps {
   compact?: boolean;
@@ -6,252 +10,176 @@ interface MarkdownTextProps {
   showCursor?: boolean;
 }
 
-type MarkdownBlock =
-  | { type: 'heading'; level: number; content: string }
-  | { type: 'paragraph'; content: string }
-  | { type: 'unordered-list'; items: string[] }
-  | { type: 'ordered-list'; items: string[] };
-
 function MarkdownText({ compact = false, content, showCursor = false }: MarkdownTextProps) {
-  const blocks = parseMarkdownBlocks(normalizeMarkdown(content));
+  const cursorElement = useMemo(() => {
+    if (!showCursor) return null;
+    return <span className="klyr-cursor ml-1 align-middle" />;
+  }, [showCursor]);
+
+  const components = useMemo(() => ({
+    code: ({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) => {
+      const match = /language-(\w+)/.exec(className || '');
+      const isInline = !match;
+
+      if (isInline) {
+        return (
+          <code
+            className="rounded-md border px-1.5 py-0.5 font-mono text-[0.88em]"
+            style={{
+              borderColor: 'color-mix(in srgb, var(--k-input-border) 75%, transparent)',
+              background: 'color-mix(in srgb, var(--k-surface) 86%, transparent)',
+              color: 'var(--k-input-fg)',
+            }}
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+    h1: ({ children }: { children?: React.ReactNode }) => (
+      <h1
+        className={compact ? 'text-[15px] font-semibold tracking-tight leading-[1.3]' : 'text-[18px] font-semibold tracking-tight leading-[1.3]'}
+        style={{ color: 'var(--k-fg)', marginTop: '1em', marginBottom: '0.5em' }}
+      >
+        {children}
+      </h1>
+    ),
+    h2: ({ children }: { children?: React.ReactNode }) => (
+      <h2
+        className={compact ? 'text-[14px] font-semibold tracking-tight leading-[1.3]' : 'text-[16px] font-semibold tracking-tight leading-[1.32]'}
+        style={{ color: 'var(--k-fg)', marginTop: '1em', marginBottom: '0.5em' }}
+      >
+        {children}
+      </h2>
+    ),
+    h3: ({ children }: { children?: React.ReactNode }) => (
+      <h3
+        className={compact ? 'text-[13px] font-semibold tracking-tight leading-[1.35]' : 'text-[15px] font-semibold tracking-tight leading-[1.35]'}
+        style={{ color: 'var(--k-fg)', marginTop: '1em', marginBottom: '0.5em' }}
+      >
+        {children}
+      </h3>
+    ),
+    h4: ({ children }: { children?: React.ReactNode }) => (
+      <h4
+        className={compact ? 'text-[12px] font-semibold uppercase tracking-[0.14em]' : 'text-[13px] font-semibold uppercase tracking-[0.14em]'}
+        style={{ color: 'var(--k-fg)', marginTop: '1em', marginBottom: '0.5em' }}
+      >
+        {children}
+      </h4>
+    ),
+    p: ({ children }: { children?: React.ReactNode }) => (
+      <p
+        className={`whitespace-pre-wrap break-words ${compact ? 'text-[13px] leading-[1.52]' : 'text-[14px] leading-[1.58]'}`}
+        style={{ color: 'var(--k-fg)', marginBottom: '0.75em' }}
+      >
+        {children}
+      </p>
+    ),
+    ul: ({ children }: { children?: React.ReactNode }) => (
+      <ul
+        className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
+        style={{ color: 'var(--k-fg)', marginBottom: '0.75em', listStyleType: 'disc' }}
+      >
+        {children}
+      </ul>
+    ),
+    ol: ({ children }: { children?: React.ReactNode }) => (
+      <ol
+        className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
+        style={{ color: 'var(--k-fg)', marginBottom: '0.75em', listStyleType: 'decimal' }}
+      >
+        {children}
+      </ol>
+    ),
+    li: ({ children }: { children?: React.ReactNode }) => (
+      <li className="list-disc" style={{ color: 'var(--k-fg)' }}>
+        <span className="whitespace-pre-wrap break-words">{children}</span>
+      </li>
+    ),
+    strong: ({ children }: { children?: React.ReactNode }) => (
+      <strong className="font-semibold" style={{ color: 'var(--k-fg)' }}>
+        {children}
+      </strong>
+    ),
+    em: ({ children }: { children?: React.ReactNode }) => (
+      <em className="italic" style={{ color: 'var(--k-fg)' }}>
+        {children}
+      </em>
+    ),
+    blockquote: ({ children }: { children?: React.ReactNode }) => (
+      <blockquote
+        className={`border-l-4 pl-4 italic ${compact ? 'text-[13px]' : 'text-[14px]'}`}
+        style={{ borderColor: 'var(--k-accent)', color: 'var(--k-muted)', margin: '0.75em 0' }}
+      >
+        {children}
+      </blockquote>
+    ),
+    a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
+      <a
+        href={href}
+        className="underline"
+        style={{ color: 'var(--k-accent)' }}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {children}
+      </a>
+    ),
+    table: ({ children }: { children?: React.ReactNode }) => (
+      <div className="overflow-x-auto">
+        <table
+          className="min-w-full border text-sm"
+          style={{ borderColor: 'var(--k-border)', marginBottom: '0.75em' }}
+        >
+          {children}
+        </table>
+      </div>
+    ),
+    th: ({ children }: { children?: React.ReactNode }) => (
+      <th
+        className="border px-3 py-2 text-left font-semibold"
+        style={{ borderColor: 'var(--k-border)', background: 'var(--k-surface)' }}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children }: { children?: React.ReactNode }) => (
+      <td className="border px-3 py-2" style={{ borderColor: 'var(--k-border)' }}>
+        {children}
+      </td>
+    ),
+    hr: () => (
+      <hr className="my-4" style={{ borderColor: 'var(--k-border)' }} />
+    ),
+    pre: ({ children }: { children?: React.ReactNode }) => (
+      <>{children}</>
+    ),
+  }), [compact]);
+
+  const processedContent = content
+    .replace(/\r\n/g, '\n')
+    .replace(/\\([`*_])/g, '$1');
 
   return (
     <div className={compact ? 'space-y-2' : 'space-y-2.5'}>
-      {blocks.map((block, index) => renderBlock(block, compact, showCursor && index === blocks.length - 1, `block-${index}`))}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={components}
+      >
+        {processedContent}
+      </ReactMarkdown>
+      {cursorElement}
     </div>
   );
-}
-
-function normalizeMarkdown(content: string): string {
-  return content
-    .replace(/\r\n/g, '\n')
-    .replace(/^\s*\\(#{1,6})\s+/gm, '$1 ')
-    .replace(/\\([`*_])/g, '$1');
-}
-
-function renderBlock(
-  block: MarkdownBlock,
-  compact: boolean,
-  showCursor: boolean,
-  key: string
-): React.ReactNode {
-  switch (block.type) {
-    case 'heading': {
-      const headingClass = getHeadingClass(block.level, compact);
-      return (
-        <div key={key} className={headingClass} style={{ color: 'var(--k-fg)' }}>
-          {renderInlineMarkdown(block.content, `${key}-heading`, showCursor)}
-        </div>
-      );
-    }
-    case 'unordered-list':
-      return (
-        <ul
-          key={key}
-          className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
-          style={{ color: 'var(--k-fg)' }}
-        >
-          {block.items.map((item, index) => (
-            <li key={`${key}-item-${index}`} className="list-disc">
-              <span className="whitespace-pre-wrap break-words">
-                {renderInlineMarkdown(item, `${key}-item-${index}`, showCursor && index === block.items.length - 1)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      );
-    case 'ordered-list':
-      return (
-        <ol
-          key={key}
-          className={`space-y-1 pl-5 ${compact ? 'text-[13px] leading-[1.5]' : 'text-sm leading-[1.55]'}`}
-          style={{ color: 'var(--k-fg)' }}
-        >
-          {block.items.map((item, index) => (
-            <li key={`${key}-item-${index}`} className="list-decimal">
-              <span className="whitespace-pre-wrap break-words">
-                {renderInlineMarkdown(item, `${key}-item-${index}`, showCursor && index === block.items.length - 1)}
-              </span>
-            </li>
-          ))}
-        </ol>
-      );
-    case 'paragraph':
-    default:
-      return (
-        <p
-          key={key}
-          className={`whitespace-pre-wrap break-words ${compact ? 'text-[13px] leading-[1.52]' : 'text-[14px] leading-[1.58]'}`}
-        >
-          {renderInlineMarkdown(block.content, `${key}-paragraph`, showCursor)}
-        </p>
-      );
-  }
-}
-
-function renderInlineMarkdown(
-  content: string,
-  keyPrefix: string,
-  showCursor: boolean
-): React.ReactNode[] {
-  const tokenPattern = /(`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|\*[^*\n]+\*|_[^_\n]+_)/g;
-  const nodes: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let matchIndex = 0;
-
-  for (const match of content.matchAll(tokenPattern)) {
-    const startIndex = match.index ?? 0;
-    if (startIndex > lastIndex) {
-      nodes.push(content.slice(lastIndex, startIndex));
-    }
-
-    const token = match[0];
-    const tokenKey = `${keyPrefix}-${matchIndex}`;
-
-    if (token.startsWith('`') && token.endsWith('`')) {
-      nodes.push(
-        <code
-          key={tokenKey}
-          className="rounded-md border px-1.5 py-0.5 font-mono text-[0.88em]"
-          style={{
-            borderColor: 'color-mix(in srgb, var(--k-input-border) 75%, transparent)',
-            background: 'color-mix(in srgb, var(--k-surface) 86%, transparent)',
-            color: 'var(--k-input-fg)',
-          }}
-        >
-          {token.slice(1, -1)}
-        </code>
-      );
-    } else if ((token.startsWith('**') && token.endsWith('**')) || (token.startsWith('__') && token.endsWith('__'))) {
-      nodes.push(
-        <strong key={tokenKey} className="font-semibold" style={{ color: 'var(--k-fg)' }}>
-          {renderInlineMarkdown(token.slice(2, -2), `${tokenKey}-strong`, false)}
-        </strong>
-      );
-    } else if ((token.startsWith('*') && token.endsWith('*')) || (token.startsWith('_') && token.endsWith('_'))) {
-      nodes.push(
-        <em key={tokenKey} className="italic" style={{ color: 'var(--k-fg)' }}>
-          {renderInlineMarkdown(token.slice(1, -1), `${tokenKey}-em`, false)}
-        </em>
-      );
-    } else {
-      nodes.push(token);
-    }
-
-    lastIndex = startIndex + token.length;
-    matchIndex += 1;
-  }
-
-  if (lastIndex < content.length) {
-    nodes.push(content.slice(lastIndex));
-  }
-
-  if (showCursor) {
-    nodes.push(<span key={`${keyPrefix}-cursor`} className="klyr-cursor ml-1 align-middle" />);
-  }
-
-  return nodes;
-}
-
-function parseMarkdownBlocks(content: string): MarkdownBlock[] {
-  const normalized = content.replace(/\r\n/g, '\n').trim();
-  if (!normalized) {
-    return [{ type: 'paragraph', content: '' }];
-  }
-
-  const lines = normalized.split('\n');
-  const blocks: MarkdownBlock[] = [];
-  let paragraphLines: string[] = [];
-
-  const flushParagraph = () => {
-    const paragraph = paragraphLines.join('\n').trim();
-    if (paragraph) {
-      blocks.push({ type: 'paragraph', content: paragraph });
-    }
-    paragraphLines = [];
-  };
-
-  for (let index = 0; index < lines.length; ) {
-    const line = lines[index];
-
-    if (!line.trim()) {
-      flushParagraph();
-      index += 1;
-      continue;
-    }
-
-    const headingMatch = line.match(/^\s*(#{1,6})\s+(.*)$/);
-    if (headingMatch) {
-      flushParagraph();
-      blocks.push({
-        type: 'heading',
-        level: headingMatch[1].length,
-        content: headingMatch[2].trim(),
-      });
-      index += 1;
-      continue;
-    }
-
-    const unorderedItems = collectList(lines, index, /^\s*[-*+]\s+(.*)$/);
-    if (unorderedItems) {
-      flushParagraph();
-      blocks.push({ type: 'unordered-list', items: unorderedItems.items });
-      index = unorderedItems.nextIndex;
-      continue;
-    }
-
-    const orderedItems = collectList(lines, index, /^\s*\d+\.\s+(.*)$/);
-    if (orderedItems) {
-      flushParagraph();
-      blocks.push({ type: 'ordered-list', items: orderedItems.items });
-      index = orderedItems.nextIndex;
-      continue;
-    }
-
-    paragraphLines.push(line);
-    index += 1;
-  }
-
-  flushParagraph();
-
-  return blocks.length > 0 ? blocks : [{ type: 'paragraph', content: normalized }];
-}
-
-function collectList(
-  lines: string[],
-  startIndex: number,
-  pattern: RegExp
-): { items: string[]; nextIndex: number } | null {
-  const items: string[] = [];
-  let index = startIndex;
-
-  while (index < lines.length) {
-    const match = lines[index].match(pattern);
-    if (!match) {
-      break;
-    }
-    items.push(match[1].trim());
-    index += 1;
-  }
-
-  if (items.length === 0) {
-    return null;
-  }
-
-  return { items, nextIndex: index };
-}
-
-function getHeadingClass(level: number, compact: boolean): string {
-  switch (level) {
-    case 1:
-      return compact ? 'text-[15px] font-semibold tracking-tight leading-[1.3]' : 'text-[18px] font-semibold tracking-tight leading-[1.3]';
-    case 2:
-      return compact ? 'text-[14px] font-semibold tracking-tight leading-[1.3]' : 'text-[16px] font-semibold tracking-tight leading-[1.32]';
-    case 3:
-      return compact ? 'text-[13px] font-semibold tracking-tight leading-[1.35]' : 'text-[15px] font-semibold tracking-tight leading-[1.35]';
-    default:
-      return compact ? 'text-[12px] font-semibold uppercase tracking-[0.14em]' : 'text-[13px] font-semibold uppercase tracking-[0.14em]';
-  }
 }
 
 export default memo(MarkdownText);

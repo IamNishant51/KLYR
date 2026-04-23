@@ -1,7 +1,8 @@
 import React, { memo, useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import CodeBlock from './CodeBlock';
 import MarkdownText from './MarkdownText';
-import { parseMessageContent } from '../lib/chat';
+import { parseMessageContent, type MessageSegment } from '../lib/chat';
 import type { ChatMessage as ChatMessageType } from '../types';
 import type { PanelLayoutMode } from '../App';
 
@@ -22,6 +23,10 @@ function ChatMessage({ message, streaming, animateOnAppear = false, draftActions
   const [visibleContent, setVisibleContent] = useState(message.content);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const isStreaming = streaming && message.role === 'assistant';
+  const renderedContent = (isStreaming || (animateOnAppear && message.role === 'assistant')) ? visibleContent : message.content;
+  const segments = parseMessageContent(renderedContent);
+  const isGeneratingEmpty = isStreaming && renderedContent.length < 10;
 
   useEffect(() => {
     const shouldTypeAnimate = streaming || (animateOnAppear && message.role === 'assistant');
@@ -58,31 +63,42 @@ function ChatMessage({ message, streaming, animateOnAppear = false, draftActions
     return () => window.cancelAnimationFrame(animationFrame);
   }, [message.content, streaming, animateOnAppear, message.role]);
 
-  const renderedContent = (streaming || (animateOnAppear && message.role === 'assistant')) ? visibleContent : message.content;
-  const segments = parseMessageContent(renderedContent);
-
   if (isSystem) {
     return (
-      <div className="klyr-fade-up flex justify-center py-2">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-center py-2"
+      >
         <span className="text-xs" style={{ color: 'var(--k-muted)' }}>
           {message.content}
         </span>
-      </div>
+      </motion.div>
     );
   }
 
   return (
-    <div className={`klyr-fade-up flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.2, 0.8, 0.2, 1] }}
+      className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}
+    >
       <div className={`flex max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-        {segments.length === 0 ? (
-          <div className="flex items-center gap-2 py-3">
-            <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full" style={{ background: 'var(--k-accent)' }} />
-            <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full [animation-delay:120ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 68%, transparent)' }} />
-            <span className="h-1.5 w-1.5 animate-klyr-pulse rounded-full [animation-delay:240ms]" style={{ background: 'color-mix(in srgb, var(--k-accent) 38%, transparent)' }} />
-          </div>
+        {segments.length === 0 || isGeneratingEmpty ? (
+          <CursorThinking />
         ) : (
           <div className="w-full">
             {segments.map((segment, segmentIndex) => {
+              if (segment.type === 'thinking') {
+                return (
+                  <ThinkingBlock
+                    key={`${message.id}-thinking-${segmentIndex}`}
+                    content={segment.content}
+                  />
+                );
+              }
+              
               if (segment.type === 'code') {
                 const treatAsMarkdown = shouldRenderAsMarkdown(segment.language, segment.content);
                 if (treatAsMarkdown) {
@@ -145,7 +161,7 @@ function ChatMessage({ message, streaming, animateOnAppear = false, draftActions
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -158,6 +174,95 @@ function shouldRenderAsMarkdown(language: string, content: string): boolean {
     return false;
   }
   return true;
+}
+
+function CursorThinking() {
+  return (
+    <div className="flex flex-col gap-2 py-3 px-1 w-full max-w-md">
+      <div className="flex items-center gap-1.5">
+        <span className="thinking-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--nami-primary)' }} />
+        <span className="thinking-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--nami-primary)' }} />
+        <span className="thinking-dot w-1.5 h-1.5 rounded-full" style={{ background: 'var(--nami-primary)' }} />
+      </div>
+      <div className="h-3 w-32 rounded skeleton-shimmer" style={{ background: 'var(--nami-surface-2)' }} />
+    </div>
+  );
+}
+
+interface ThinkingBlockProps {
+  content: string;
+}
+
+function ThinkingBlock({ content }: ThinkingBlockProps) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  return (
+    <div
+      className="mb-3 overflow-hidden rounded-lg border transition-all duration-300"
+      style={{
+        borderColor: 'color-mix(in srgb, var(--k-accent) 30%, var(--k-border))',
+        background: 'color-mix(in srgb, var(--k-surface) 60%, transparent)',
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-color-mix(in srgb, var(--k-surface) 40%, transparent)"
+      >
+        <span className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--k-accent)' }}>
+          <ThinkingIcon />
+          Thinking
+        </span>
+        <ChevronIcon expanded={isExpanded} />
+      </button>
+      
+      <div
+        className="overflow-hidden transition-all duration-300"
+        style={{
+          maxHeight: isExpanded ? '500px' : '0',
+          opacity: isExpanded ? 1 : 0,
+        }}
+      >
+        <div className="px-3 pb-3">
+          <pre
+            className="text-[12px] leading-[1.5] whitespace-pre-wrap"
+            style={{ color: 'var(--k-muted)' }}
+          >
+            {content}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4M12 8h.01" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className="transition-transform duration-200"
+      style={{
+        color: 'var(--k-muted)',
+        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+      }}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
 }
 
 export default memo(ChatMessage);

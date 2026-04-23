@@ -1,6 +1,7 @@
 import type {
   Coder,
   CoderAnswer,
+  CoderResponse,
   CoderInput,
   CodeDraft,
   DraftFileChange,
@@ -58,7 +59,7 @@ export class OllamaCoder implements Coder {
     this.temperature = options.temperature;
   }
 
-  async generate(input: CoderInput): Promise<CodeDraft> {
+  async generate(input: CoderInput): Promise<CoderResponse> {
     // Store the most relevant file path for fallback and repair.
     this.lastContextFile = this.resolvePrimaryContextFile(input);
     
@@ -74,29 +75,38 @@ export class OllamaCoder implements Coder {
 
     const parsed = this.parseResponse(response.content);
     
+    if (parsed.type === 'tool_use') {
+      return parsed;
+    }
+
+    if (parsed.type !== 'draft') {
+      return parsed;
+    }
+
+    const draft = parsed.draft;
     // ALWAYS validate and correct common mistakes in file content
     const validated = await this.normalizeDraftOperationsForWorkspace(
-      this.validateAndCorrectDraft(parsed, input.prompt),
+      this.validateAndCorrectDraft(draft, input.prompt),
       input.context.workspace.root
     );
     
     if (!this.shouldAttemptRepair(validated, response.content)) {
-      return validated;
+      return { type: 'draft', draft: validated };
     }
 
     try {
       const repaired = await this.repairDraftPayload(input, response.content);
       if (repaired.changes.length > 0) {
-        return await this.normalizeDraftOperationsForWorkspace(
-          repaired,
-          input.context.workspace.root
-        );
+        return { 
+          type: 'draft', 
+          draft: await this.normalizeDraftOperationsForWorkspace(repaired, input.context.workspace.root) 
+        };
       }
     } catch {
       // Keep original parsed response if repair fails.
     }
 
-    return validated;
+    return { type: 'draft', draft: validated };
   }
 
   private async normalizeDraftOperationsForWorkspace(
@@ -123,6 +133,7 @@ export class OllamaCoder implements Coder {
   }
 
   async answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer> {
+    const limitedFiles = input.context.files.slice(0, 4);
     const messages = [
       {
         role: 'system' as const,
@@ -133,14 +144,14 @@ export class OllamaCoder implements Coder {
         content: JSON.stringify({
           prompt: input.prompt,
           plan: input.plan,
-          contextFiles: input.context.files.map((file) => ({
+          contextFiles: limitedFiles.map((file) => ({
             path: file.path,
             reason: file.reason,
-            content: this.trimText(file.content, 4000),
+            content: this.trimText(file.content, 2500),
           })),
           workspace: input.context.workspace,
-          memory: input.context.memory,
-          notes: input.context.notes ?? '',
+          memory: this.trimText(input.context.memory, 800),
+          notes: input.context.notes ? this.trimText(input.context.notes, 500) : '',
         }),
       },
     ];
@@ -183,6 +194,7 @@ export class OllamaCoder implements Coder {
   }
 
   async completeInline(input: InlineCompletionInput): Promise<string> {
+    const limitedContext = input.context.files.slice(0, 3);
     const response = await this.client.chat({
       model: this.model,
       messages: [
@@ -195,15 +207,15 @@ export class OllamaCoder implements Coder {
           content: JSON.stringify({
             filePath: input.filePath,
             languageId: input.languageId,
-            prefix: this.trimText(input.prefix, 2500),
-            suffix: this.trimText(input.suffix, 1200),
+            prefix: this.trimText(input.prefix, 2000),
+            suffix: this.trimText(input.suffix, 800),
             workspace: input.context.workspace,
-            contextFiles: input.context.files.map((file) => ({
+            contextFiles: limitedContext.map((file) => ({
               path: file.path,
               reason: file.reason,
-              content: this.trimText(file.content, 1800),
+              content: this.trimText(file.content, 1200),
             })),
-            memory: input.context.memory,
+            memory: this.trimText(input.context.memory, 400),
           }),
         },
       ],
@@ -226,20 +238,21 @@ Example output:
 
 If optimizing, make sure proposedContent includes ALL original code plus your improvements.`;
 
+    const limitedFiles = input.context.files.slice(0, 6);
     return JSON.stringify({
       instruction,
       prompt: input.prompt,
       plan: input.plan,
       deterministic: input.deterministic,
       validationErrors: input.validationErrors ?? [],
-      contextFiles: input.context.files.map((file) => ({
+      contextFiles: limitedFiles.map((file) => ({
         path: file.path,
         reason: file.reason,
-        content: this.trimText(file.content, 15000),
+        content: this.trimText(file.content, 8000),
       })),
       workspace: input.context.workspace,
-      memory: input.context.memory,
-      notes: input.context.notes ?? '',
+      memory: this.trimText(input.context.memory, 600),
+      notes: input.context.notes ? this.trimText(input.context.notes, 400) : '',
     });
   }
 
@@ -258,47 +271,39 @@ If optimizing, make sure proposedContent includes ALL original code plus your im
     return mentioned?.path ?? input.context.files[0].path;
   }
 
-  private parseResponse(raw: string): CodeDraft {
+  private parseResponse(raw: string): CoderResponse {
     try {
-      return this.parseJsonDirect(raw);
+      const json = JSON.parse(this.stripCodeFences(raw).trim());
+      if (json.type === 'tool_use' && Array.isArray(json.requests)) {
+        return { type: 'tool_use', requests: json.requests };
+      }
+      if (json.type === 'draft' || json.changes) {
+        return { type: 'draft', draft: this.toDraft(json) };
+      }
     } catch {
-      // Try next strategy.
+      // Fallback to a greedy search for JSON
     }
 
     try {
-      return this.parseJsonFromMarkdown(raw);
-    } catch {
-      // Try next strategy.
-    }
+      const stripped = this.stripCodeFences(raw).trim();
+      const firstBrace = stripped.indexOf('{');
+      const lastBrace = stripped.lastIndexOf('}');
+      if (firstBrace >= 0 && lastBrace > firstBrace) {
+        const jsonString = stripped.slice(firstBrace, lastBrace + 1);
+        const json = JSON.parse(jsonString);
+        if (json.type === 'tool_use' && Array.isArray(json.requests)) {
+          return { type: 'tool_use', requests: json.requests };
+        }
+        if (json.type === 'draft' || json.changes) {
+          return { type: 'draft', draft: this.toDraft(json) };
+        }
+      }
+    } catch {}
 
-    try {
-      return this.parseJsonGreedy(raw);
-    } catch {
-      // Final fallback.
-    }
-
-    return this.parseFallback(raw);
-  }
-
-  private parseJsonDirect(raw: string): CodeDraft {
-    return this.toDraft(JSON.parse(raw.trim()) as OllamaDraftPayload);
-  }
-
-  private parseJsonFromMarkdown(raw: string): CodeDraft {
-    const match = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const jsonString = (match ? match[1] : raw).trim();
-    return this.parseJsonDirect(jsonString);
-  }
-
-  private parseJsonGreedy(raw: string): CodeDraft {
-    const stripped = this.stripCodeFences(raw).trim();
-    const firstBrace = stripped.indexOf('{');
-    const lastBrace = stripped.lastIndexOf('}');
-    if (firstBrace < 0 || lastBrace <= firstBrace) {
-      throw new Error('No JSON object braces found in response');
-    }
-    const jsonString = stripped.slice(firstBrace, lastBrace + 1);
-    return this.parseJsonDirect(jsonString);
+    return {
+      type: 'draft',
+      draft: this.parseFallback(raw)
+    };
   }
 
   private parseFallback(raw: string): CodeDraft {
@@ -1338,8 +1343,8 @@ npm run dev
       });
 
       const parsed = this.parseResponse(repairResponse.content);
-      if (parsed.changes.length > 0) {
-        return parsed;
+      if (parsed.type === 'draft' && parsed.draft.changes.length > 0) {
+        return parsed.draft;
       }
     } catch {
       // Repair failed

@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import { OllamaCoder } from './ollamaCoder';
 import type { OllamaChatRequest, OllamaClient } from '../llm/ollamaClient';
 import type { PlanResult } from './planner';
+import type { DraftFileChange } from './coder';
 
 const originalReadme = [
   '# README',
@@ -93,7 +94,12 @@ suite('Content Preservation', () => {
       deterministic: true,
     });
 
-    const readmeChange = result.changes.find((change) => change.path === 'README.md');
+    assert.strictEqual(result.type, 'draft');
+    if (result.type !== 'draft') {
+      assert.fail('Expected draft response');
+    }
+
+    const readmeChange = result.draft.changes.find((change: DraftFileChange) => change.path === 'README.md');
     assert.ok(readmeChange, 'README change should be present');
     assert.ok(readmeChange.proposedContent, 'proposedContent should be present');
     assert.ok(

@@ -50,35 +50,48 @@ export class InMemoryContextEngine implements ContextEngine {
     for (const id of this.documents.keys()) {
       if (!activeIds.has(id)) {
         this.documents.delete(id);
-        this.vectors.delete(id);
+        // Clear all associated chunk vectors
+        for (const vectorId of this.vectors.keys()) {
+          if (vectorId.startsWith(id + '#chunk-')) {
+            this.vectors.delete(vectorId);
+          }
+        }
       }
     }
 
-    const needsEmbedding: Array<{ doc: ContextDocument; embedText: string; cacheKey: string }> = [];
+    const needsEmbedding: Array<{ id: string; embedText: string; cacheKey: string }> = [];
 
     for (const doc of documents) {
       this.documents.set(doc.id, doc);
-      const embedText = [doc.uri, doc.title ?? '', ...(doc.tags ?? []), doc.content].join('\n');
-      const cacheKey = this.getCacheKey(doc);
-      const cached = this.embeddingCache.get(cacheKey);
-      if (cached) {
-        this.vectors.set(doc.id, cached);
-      } else {
-        needsEmbedding.push({ doc, embedText, cacheKey });
+      
+      // Cursor-style: Chunk the document for high-precision retrieval
+      const chunks = chunkContextDocument(doc);
+      
+      for (const chunk of chunks) {
+        const embedText = [chunk.uri, chunk.title ?? '', ...(chunk.tags ?? []), chunk.content].join('\\n');
+        const cacheKey = this.getCacheKey(chunk);
+        const cached = this.embeddingCache.get(cacheKey);
+        
+        if (cached) {
+          this.vectors.set(chunk.id, cached);
+        } else {
+          needsEmbedding.push({ id: chunk.id, embedText, cacheKey });
+        }
       }
     }
 
     if (needsEmbedding.length > 0) {
-      const embedded = await Promise.all(
-        needsEmbedding.map(async (item) => {
-          const vector = await this.embeddings.embedText(item.embedText);
-          return { ...item, vector };
-        })
-      );
-
-      for (const item of embedded) {
-        this.addToCache(item.cacheKey, item.vector);
-        this.vectors.set(item.doc.id, item.vector);
+      // Batch embeddings to prevent Ollama overload and improve speed
+      const BATCH_SIZE = 5;
+      for (let i = 0; i < needsEmbedding.length; i += BATCH_SIZE) {
+        const batch = needsEmbedding.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (item) => {
+            const vector = await this.embeddings.embedText(item.embedText);
+            this.addToCache(item.cacheKey, vector);
+            this.vectors.set(item.id, vector);
+          })
+        );
       }
     }
   }
@@ -89,28 +102,45 @@ export class InMemoryContextEngine implements ContextEngine {
     }
 
     const queryVector = await this.embeddings.embedText(input.query);
-    const results: ContextMatch[] = [];
+    const chunkMatches: Array<{ chunkId: string; score: number }> = [];
 
-    for (const [id, doc] of this.documents.entries()) {
-      const vector = this.vectors.get(id);
-      if (!vector) {
-        continue;
-      }
-
-      const sourceBoost =
-        doc.source === 'active'
-          ? 0.08
-          : doc.source === 'selection'
-            ? 0.05
-            : doc.source === 'open'
-              ? 0.03
-              : 0;
-      const score = this.cosineSimilarity(queryVector.values, vector.values) + sourceBoost;
-      results.push({ document: doc, score });
+    // Search across all chunk vectors
+    for (const [chunkId, vector] of this.vectors.entries()) {
+      const score = this.cosineSimilarity(queryVector.values, vector.values);
+      chunkMatches.push({ chunkId, score });
     }
 
-    results.sort((left, right) => right.score - left.score);
-    return results.slice(0, input.maxResults);
+    chunkMatches.sort((left, right) => right.score - left.score);
+
+    const results: ContextMatch[] = [];
+    const seenDocuments = new Set<string>();
+
+    for (const match of chunkMatches) {
+      if (results.length >= input.maxResults) break;
+
+      // Extract parent doc ID from chunk ID (e.g., "file.ts#chunk-0" -> "file.ts")
+      const docId = match.chunkId.split('#chunk-')[0];
+      const doc = this.documents.get(docId);
+
+      if (doc && !seenDocuments.has(docId)) {
+        const sourceBoost =
+          doc.source === 'active'
+            ? 0.08
+            : doc.source === 'selection'
+              ? 0.05
+              : doc.source === 'open'
+                ? 0.03
+                : 0;
+        
+        results.push({ 
+          document: doc, 
+          score: match.score + sourceBoost 
+        });
+        seenDocuments.add(docId);
+      }
+    }
+
+    return results;
   }
 
   async recordMemory(item: ContextMemoryItem): Promise<void> {

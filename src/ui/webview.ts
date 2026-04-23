@@ -10,6 +10,7 @@ export type UiStatus =
   | 'validating'
   | 'review'
   | 'executing'
+  | 'reading'
   | 'fixing';
 
 export interface UiChatMessage {

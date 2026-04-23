@@ -6,6 +6,11 @@ import type {
   UiPhase,
 } from '../types';
 
+export interface ThinkingSegment {
+  type: 'thinking';
+  content: string;
+}
+
 export interface TextSegment {
   type: 'text';
   content: string;
@@ -17,23 +22,60 @@ export interface CodeSegment {
   content: string;
 }
 
-export type MessageSegment = TextSegment | CodeSegment;
+export type MessageSegment = ThinkingSegment | TextSegment | CodeSegment;
 
 export function parseMessageContent(content: string): MessageSegment[] {
   const normalized = content.replace(/\r\n/g, '\n');
-  const pattern = /```([\w.+-]*)\n?([\s\S]*?)```/g;
+  const thinkingPattern = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  const codePattern = /```([\w.+-]*)\n?([\s\S]*?)```/g;
+  
+  const segments: MessageSegment[] = [];
+  let remainingContent = normalized;
+  
+  let thinkingMatch = thinkingPattern.exec(normalized);
+  while (thinkingMatch) {
+    const startIndex = thinkingMatch.index;
+    const thinkingContent = thinkingMatch[1].trim();
+    
+    const beforeText = remainingContent.slice(0, startIndex).trim();
+    if (beforeText) {
+      segments.push(...parseTextAndCode(beforeText));
+    }
+    
+    if (thinkingContent) {
+      segments.push({ type: 'thinking', content: thinkingContent });
+    }
+    
+    remainingContent = remainingContent.slice(startIndex + thinkingMatch[0].length);
+    thinkingPattern.lastIndex = 0;
+    thinkingMatch = thinkingPattern.exec(normalized);
+  }
+  
+  if (remainingContent.trim()) {
+    segments.push(...parseTextAndCode(remainingContent.trim()));
+  }
+  
+  if (segments.length === 0 && normalized.trim()) {
+    return [{ type: 'text', content: normalized.trim() }];
+  }
+  
+  return segments;
+}
+
+function parseTextAndCode(content: string): MessageSegment[] {
+  const codePattern = /```([\w.+-]*)\n?([\s\S]*?)```/g;
   const segments: MessageSegment[] = [];
   let lastIndex = 0;
-
-  for (const match of normalized.matchAll(pattern)) {
+  
+  for (const match of content.matchAll(codePattern)) {
     const startIndex = match.index ?? 0;
     if (startIndex > lastIndex) {
-      const text = normalized.slice(lastIndex, startIndex).trim();
+      const text = content.slice(lastIndex, startIndex).trim();
       if (text) {
         segments.push({ type: 'text', content: text });
       }
     }
-
+    
     segments.push({
       type: 'code',
       language: (match[1] || 'text').trim() || 'text',
@@ -41,18 +83,14 @@ export function parseMessageContent(content: string): MessageSegment[] {
     });
     lastIndex = startIndex + match[0].length;
   }
-
-  if (lastIndex < normalized.length) {
-    const text = normalized.slice(lastIndex).trim();
+  
+  if (lastIndex < content.length) {
+    const text = content.slice(lastIndex).trim();
     if (text) {
       segments.push({ type: 'text', content: text });
     }
   }
-
-  if (segments.length === 0 && normalized.trim()) {
-    return [{ type: 'text', content: normalized.trim() }];
-  }
-
+  
   return segments;
 }
 
@@ -101,7 +139,7 @@ export function deriveUiPhase(
 }
 
 export function isBusyPhase(phase: UiPhase): boolean {
-  return phase === 'thinking' || phase === 'generating' || phase === 'validating' || phase === 'executing';
+  return phase === 'planning' || phase === 'retrieving' || phase === 'thinking' || phase === 'generating' || phase === 'validating' || phase === 'executing' || phase === 'reading';
 }
 
 export function getLatestAssistantMessage(messages: ChatMessage[]): ChatMessage | undefined {

@@ -1,67 +1,68 @@
 {
-  "name": "klyr",
-  "displayName": "klyr",
-  "description": "Klyr is a next-generation AI coding assistant for VS Code powered by local LLMs. It delivers fast, context-aware code generation, intelligent refactoring, and precise debugging without relying on external APIs. Built with a deterministic agent pipeline, Klyr reads your entire workspace, plans tasks step-by-step, validates outputs using AST-based checks, and applies safe, previewable changes to eliminate hallucinations.",
+  "name": "nami",
+  "displayName": "Nami",
+  "description": "Nami is your AI coding agent. Powered by local LLMs, Nami reads your workspace, executes shell commands, and modifies files to build your projects. The same Nami you love on desktop, now in VS Code.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.110.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages",
+    "AI"
   ],
   "activationEvents": [
-    "onCommand:klyr.openChat",
-    "onView:klyr.chatLauncher",
-    "onView:klyr.chatView"
+    "onCommand:nami.openChat",
+    "onView:nami.chatLauncher",
+    "onView:nami.chatView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "klyr.openChat",
-        "title": "Klyr: Open Chat"
+        "command": "nami.openChat",
+        "title": "Nami: Open Chat"
       },
       {
-        "command": "klyr.fixCurrentFile",
-        "title": "Klyr: Fix Current File"
+        "command": "nami.fixCurrentFile",
+        "title": "Nami: Fix Current File"
       },
       {
-        "command": "klyr.refactorCurrentFile",
-        "title": "Klyr: Refactor Current File"
+        "command": "nami.refactorCurrentFile",
+        "title": "Nami: Refactor Current File"
       },
       {
-        "command": "klyr.optimizeCurrentFile",
-        "title": "Klyr: Optimize Current File"
+        "command": "nami.optimizeCurrentFile",
+        "title": "Nami: Optimize Current File"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "klyr-chat-launcher",
-          "title": "Klyr",
-          "icon": "media/klyr-icon.svg"
+          "id": "nami-chat-launcher",
+          "title": "Nami",
+          "icon": "media/nami-icon.svg"
         }
       ],
       "panel": [
         {
-          "id": "klyr-chat-panel",
-          "title": "Klyr",
-          "icon": "media/klyr-icon.svg"
+          "id": "nami-chat-panel",
+          "title": "Nami",
+          "icon": "media/nami-icon.svg"
         }
       ]
     },
     "views": {
-      "klyr-chat-launcher": [
+      "nami-chat-launcher": [
         {
-          "id": "klyr.chatLauncher",
+          "id": "nami.chatLauncher",
           "name": "Open Chat",
           "type": "webview",
           "when": "true"
         }
       ],
-      "klyr-chat-panel": [
+      "nami-chat-panel": [
         {
-          "id": "klyr.chatView",
+          "id": "nami.chatView",
           "name": "Chat",
           "type": "webview",
           "when": "true"
@@ -69,102 +70,107 @@
       ]
     },
     "configuration": {
-      "title": "Klyr",
+      "title": "Nami",
       "properties": {
-        "klyr.ollama.baseUrl": {
+        "nami.ollama.baseUrl": {
           "type": "string",
           "default": "http://localhost:11434",
           "description": "Base URL for the local Ollama server."
         },
-        "klyr.ollama.model": {
+        "nami.ollama.model": {
           "type": "string",
           "default": "qwen2.5-coder",
           "description": "Ollama model name to use for code generation."
         },
-        "klyr.ollama.visionModel": {
+        "nami.ollama.fastModel": {
+          "type": "string",
+          "default": "qwen2.5-coder:2b",
+          "description": "Fast model for quick completions (uses less memory, faster)."
+        },
+        "nami.ollama.visionModel": {
           "type": "string",
           "default": "llava:latest",
           "description": "Ollama vision model used to analyze pasted images in chat."
         },
-        "klyr.ollama.temperature": {
+        "nami.ollama.temperature": {
           "type": "number",
           "default": 0,
           "description": "Sampling temperature. Use 0 for deterministic output."
         },
-        "klyr.ollama.timeoutMs": {
+        "nami.ollama.timeoutMs": {
           "type": "number",
           "default": 60000,
           "description": "Request timeout in milliseconds."
         },
-        "klyr.ollama.maxRetries": {
+        "nami.ollama.maxRetries": {
           "type": "number",
           "default": 2,
           "description": "Number of retry attempts for Ollama requests."
         },
-        "klyr.ollama.retryBackoffMs": {
+        "nami.ollama.retryBackoffMs": {
           "type": "number",
           "default": 800,
           "description": "Backoff between retries in milliseconds."
         },
-        "klyr.context.maxFiles": {
+        "nami.context.maxFiles": {
           "type": "number",
           "default": 120,
           "description": "Maximum number of workspace files to index per request."
         },
-        "klyr.context.maxFileSize": {
+        "nami.context.maxFileSize": {
           "type": "number",
           "default": 204800,
           "description": "Maximum file size in bytes for indexed text files."
         },
-        "klyr.context.maxTotalSize": {
+        "nami.context.maxTotalSize": {
           "type": "number",
           "default": 512000,
           "description": "Maximum total indexed text size per request."
         },
-        "klyr.context.retrievalMaxResults": {
+        "nami.context.retrievalMaxResults": {
           "type": "number",
           "default": 8,
           "description": "Maximum number of retrieved context chunks to send to the model."
         },
-        "klyr.context.retrievalMinScore": {
+        "nami.context.retrievalMinScore": {
           "type": "number",
           "default": 0,
           "description": "Minimum retrieval score kept after ranking."
         },
-        "klyr.execution.maxAttempts": {
+        "nami.execution.maxAttempts": {
           "type": "number",
           "default": 2,
           "description": "Maximum fixer-loop attempts before failing."
         },
-        "klyr.execution.noOp": {
+        "nami.execution.noOp": {
           "type": "boolean",
           "default": false,
           "description": "Reserved no-op execution flag for future dry-run modes."
         },
-        "klyr.inline.enabled": {
+        "nami.inline.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable inline ghost-text completions from the local model."
         },
-        "klyr.inline.maxPrefixChars": {
+        "nami.inline.maxPrefixChars": {
           "type": "number",
           "default": 2500,
           "description": "Maximum prefix characters sent for inline completions."
         },
-        "klyr.inline.maxSuffixChars": {
+        "nami.inline.maxSuffixChars": {
           "type": "number",
           "default": 1200,
           "description": "Maximum suffix characters sent for inline completions."
         },
-        "klyr.mcp.enabled": {
+        "nami.mcp.enabled": {
           "type": "boolean",
           "default": false,
           "description": "Enable Model Context Protocol (MCP) server integration for external tools."
         },
-        "klyr.mcp.servers": {
+        "nami.mcp.servers": {
           "type": "array",
           "default": [],
-          "description": "List of MCP servers. Example entries include sequential-thinking and stitch servers.",
+          "description": "List of MCP servers.",
           "items": {
             "type": "object",
             "required": [
@@ -174,7 +180,7 @@
             "properties": {
               "name": {
                 "type": "string",
-                "description": "Logical server name (for example: sequential-thinking or stitch)."
+                "description": "Logical server name."
               },
               "command": {
                 "type": "string",
@@ -208,37 +214,32 @@
             }
           }
         },
-        "klyr.rag.strictCitations": {
+        "nami.rag.strictCitations": {
           "type": "boolean",
           "default": true,
-          "description": "When enabled, chat answers using external context must include source citations, otherwise the answer is rejected."
+          "description": "When enabled, chat answers using external context must include source citations."
         },
-        "klyr.rag.trustedDomains": {
+        "nami.rag.trustedDomains": {
           "type": "array",
           "default": [
             "wikipedia.org",
             "github.com",
             "raw.githubusercontent.com",
             "duckduckgo.com",
-            "developer.mozilla.org",
-            "dribbble.com",
-            "behance.net",
-            "awwwards.com",
-            "land-book.com",
-            "siteinspire.com"
+            "developer.mozilla.org"
           ],
           "items": {
             "type": "string"
           },
           "description": "Domain allowlist used by external RAG retrieval."
         },
-        "klyr.rag.trustedGitHubOrgs": {
+        "nami.rag.trustedGitHubOrgs": {
           "type": "array",
           "default": [],
           "items": {
             "type": "string"
           },
-          "description": "Optional GitHub organization allowlist for repository retrieval. Empty means no org restriction."
+          "description": "Optional GitHub organization allowlist for repository retrieval."
         }
       }
     }
@@ -258,32 +259,38 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "langchain": "^0.3.0",
-    "@langchain/ollama": "^0.1.0",
     "@langchain/core": "^0.3.0",
-    "js-tiktoken": "^1.0.12"
+    "@langchain/ollama": "^0.1.0",
+    "framer-motion": "^12.38.0",
+    "highlight.js": "^11.11.1",
+    "js-tiktoken": "^1.0.12",
+    "langchain": "^0.3.0",
+    "lucide-react": "^1.8.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.110.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "typescript-eslint": "^8.56.1",
-    "eslint": "^9.39.3",
-    "typescript": "^5.9.3",
-    "ts-loader": "^9.5.4",
-    "webpack": "^5.105.3",
-    "webpack-cli": "^6.0.1",
+    "@types/vscode": "^1.110.0",
+    "@vitejs/plugin-react": "^4.2.0",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
-    "vite": "^5.0.0",
-    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "eslint": "^9.39.3",
+    "postcss": "^8.4.32",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "tailwindcss": "^3.4.0",
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.32",
-    "concurrently": "^8.2.2"
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vite": "^5.0.0",
+    "webpack": "^5.105.3",
+    "webpack-cli": "^6.0.1"
   }
 }

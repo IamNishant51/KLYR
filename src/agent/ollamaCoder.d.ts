@@ -1,4 +1,4 @@
-import type { Coder, CoderAnswer, CoderInput, CodeDraft, InlineCompletionInput } from './coder';
+import type { Coder, CoderAnswer, CoderResponse, CoderInput, InlineCompletionInput } from './coder';
 import type { OllamaClient } from '../llm/ollamaClient';
 export interface OllamaCoderOptions {
     client: OllamaClient;
@@ -11,7 +11,7 @@ export declare class OllamaCoder implements Coder {
     private readonly temperature;
     private lastContextFile;
     constructor(options: OllamaCoderOptions);
-    generate(input: CoderInput): Promise<CodeDraft>;
+    generate(input: CoderInput): Promise<CoderResponse>;
     private normalizeDraftOperationsForWorkspace;
     answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer>;
     completeInline(input: InlineCompletionInput): Promise<string>;
@@ -19,9 +19,6 @@ export declare class OllamaCoder implements Coder {
     private buildUserPrompt;
     private resolvePrimaryContextFile;
     private parseResponse;
-    private parseJsonDirect;
-    private parseJsonFromMarkdown;
-    private parseJsonGreedy;
     private parseFallback;
     private toDraft;
     private stripCodeFences;

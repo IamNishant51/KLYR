@@ -1,63 +1,67 @@
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-export interface KlyrConfig {
-    logLevel: LogLevel;
-    ollama: OllamaConfig;
-    context: ContextConfig;
-    execution: ExecutionConfig;
-    inline: InlineCompletionConfig;
-    mcp: McpConfig;
-    rag: RagConfig;
-}
-export interface OllamaConfig {
-    baseUrl: string;
-    model: string;
-    visionModel: string;
-    temperature: number;
-    timeoutMs: number;
-    maxRetries: number;
-    retryBackoffMs: number;
-}
-export interface ContextConfig {
-    maxFiles: number;
-    maxFileSize: number;
-    maxTotalSize: number;
-    retrievalMaxResults: number;
-    retrievalMinScore: number;
-}
-export interface ExecutionConfig {
-    maxAttempts: number;
-    noOp: boolean;
-}
-export interface InlineCompletionConfig {
-    enabled: boolean;
-    maxPrefixChars: number;
-    maxSuffixChars: number;
+export interface NamiConfig {
+    ollama: {
+        baseUrl: string;
+        model: string;
+        fastModel: string;
+        visionModel: string;
+        temperature: number;
+        timeoutMs: number;
+        maxRetries: number;
+        retryBackoffMs: number;
+        maxTokens: number;
+        stream: boolean;
+    };
+    context: {
+        maxFiles: number;
+        maxFileSize: number;
+        maxTotalSize: number;
+        retrievalMaxResults: number;
+        retrievalMinScore: number;
+        useSummary: boolean;
+        maxContextChunks: number;
+        chunkOverlap: number;
+        chunkSize: number;
+    };
+    execution: {
+        maxAttempts: number;
+        noOp: boolean;
+    };
+    inline: {
+        enabled: boolean;
+        maxPrefixChars: number;
+        maxSuffixChars: number;
+    };
+    mcp: {
+        enabled: boolean;
+        servers: McpServerConfig[];
+    };
+    rag: {
+        strictCitations: boolean;
+        trustedDomains: string[];
+        trustedGitHubOrgs: string[];
+    };
+    optimization: {
+        enableCaching: boolean;
+        compressContext: boolean;
+        fastMode: boolean;
+    };
 }
 export interface McpServerConfig {
     name: string;
     command: string;
-    args: string[];
+    args?: string[];
     cwd?: string;
     env?: Record<string, string>;
     enabled: boolean;
     timeoutMs: number;
 }
-export interface McpConfig {
-    enabled: boolean;
-    servers: McpServerConfig[];
-}
-export interface RagConfig {
-    strictCitations: boolean;
-    trustedDomains: string[];
-    trustedGitHubOrgs: string[];
-}
-export declare function defaultConfig(): KlyrConfig;
+export declare function defaultConfig(): NamiConfig;
 export declare class Logger {
     private level;
-    constructor(level?: LogLevel);
-    debug(message: string, ...args: unknown[]): void;
-    info(message: string, ...args: unknown[]): void;
-    warn(message: string, ...args: unknown[]): void;
-    error(message: string, ...args: unknown[]): void;
-    private shouldLog;
+    constructor(level?: 'debug' | 'info' | 'warn' | 'error');
+    debug(message: string): void;
+    info(message: string): void;
+    warn(message: string): void;
+    error(message: string): void;
 }
+export type { NamiConfig as KlyrConfig };

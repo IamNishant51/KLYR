@@ -27,7 +27,7 @@ import { ContextOrchestrator, type ContextRequest } from './context/orchestrator
 import { GroundedRagService } from './context/groundedRag';
 import { McpManager } from './mcp/manager';
 import { HttpOllamaClient } from './llm/ollamaClient';
-import { defaultConfig, Logger, type KlyrConfig } from './core/config';
+import { defaultConfig, Logger, type NamiConfig } from './core/config';
 import { Pipeline, type PipelineResult, type PipelineStage } from './core/pipeline';
 import type { ApplyResult } from './agent/executor';
 import {
@@ -55,7 +55,7 @@ interface RuntimeContext {
   workspaceSummary: string;
   dependencyAllowlist: string[];
   documents: ContextDocument[];
-  config: KlyrConfig;
+  config: NamiConfig;
   workspaceIndex: WorkspaceIndex;
 }
 
@@ -90,10 +90,10 @@ interface CommandWorkflowResult {
   continuationRoot?: string;
 }
 
-const SESSION_STATE_KEY = 'klyr.chatSession';
-const MEMORY_STATE_KEY = 'klyr.memoryEntries';
-const CHAT_HISTORY_STATE_KEY = 'klyr.chatHistory';
-const OLLAMA_AUTOSTART_ATTEMPTED_KEY = 'klyr.ollamaAutostartAttempted';
+const SESSION_STATE_KEY = 'nami.chatSession';
+const MEMORY_STATE_KEY = 'nami.memoryEntries';
+const CHAT_HISTORY_STATE_KEY = 'nami.chatHistory';
+const OLLAMA_AUTOSTART_ATTEMPTED_KEY = 'nami.ollamaAutostartAttempted';
 
 interface ChatHistoryEntry {
   id: string;
@@ -133,14 +133,14 @@ const removedLineDecoration = vscode.window.createTextEditorDecorationType({
 });
 
 /**
- * WebviewViewProvider for the Klyr sidebar chat view
+ * WebviewViewProvider for the Nami sidebar chat view
  */
-class KlyrChatViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'klyr.chatView';
+class NamiChatViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'nami.chatView';
   
   constructor(
     private readonly extensionContext: vscode.ExtensionContext,
-    private readonly controller: KlyrExtensionController
+    private readonly controller: NamiExtensionController
   ) {}
 
   public resolveWebviewView(
@@ -251,9 +251,9 @@ class KlyrChatViewProvider implements vscode.WebviewViewProvider {
           </head>
           <body>
             <div class="container">
-              <h2>Klyr Chat</h2>
+              <h2>Nami Chat</h2>
               <div class="message-area" id="messages">
-                <p>Welcome to Klyr! Start typing to ask the AI for help with your code.</p>
+                <p>Welcome to Nami! Start typing to ask the AI for help with your code.</p>
               </div>
               <textarea id="input" placeholder="Ask me to help with your code..." style="height: 80px;"></textarea>
               <button onclick="sendMessage()">Send Message</button>
@@ -311,10 +311,10 @@ class KlyrChatViewProvider implements vscode.WebviewViewProvider {
   }
 }
 
-class KlyrLauncherViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'klyr.chatLauncher';
+class NamiLauncherViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'nami.chatLauncher';
 
-  constructor(private readonly controller: KlyrExtensionController) {}
+  constructor(private readonly controller: NamiExtensionController) {}
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -369,10 +369,10 @@ class KlyrLauncherViewProvider implements vscode.WebviewViewProvider {
         </head>
         <body>
           <div class="card">
-            <div class="eyebrow">Klyr</div>
+            <div class="eyebrow">Nami</div>
             <div class="title">Opening chat on the right...</div>
             <div class="copy">
-              This launcher keeps the real Klyr chat in a dedicated right-side panel instead of the file sidebar.
+              This launcher keeps the real Nami chat in a dedicated right-side panel instead of the file sidebar.
             </div>
           </div>
         </body>
@@ -408,9 +408,9 @@ function applyDecorationsForEditor(editor: vscode.TextEditor): void {
     return;
   }
 
-  console.log(`[Klyr] Applying decorations to ${editor.document.fileName}`);
-  console.log(`[Klyr] Added lines: ${changeInfo.addedLines.join(', ')}`);
-  console.log(`[Klyr] Removed lines: ${changeInfo.removedLines.join(', ')}`);
+  console.log(`[Nami] Applying decorations to ${editor.document.fileName}`);
+  console.log(`[Nami] Added lines: ${changeInfo.addedLines.join(', ')}`);
+  console.log(`[Nami] Removed lines: ${changeInfo.removedLines.join(', ')}`);
 
   // Create decoration ranges for added and removed lines
   const addedRanges = changeInfo.addedLines.map(
@@ -533,9 +533,9 @@ function calculateLineRanges(
     }
   }
   
-  console.log(`[Klyr] calculateLineRanges: before=${beforeLines.length} lines, after=${afterLines.length} lines`);
-  console.log(`[Klyr] Added: ${Array.from(addedLines).join(', ') || 'none'}`);
-  console.log(`[Klyr] Removed: ${Array.from(removedLines).join(', ') || 'none'}`);
+  console.log(`[Nami] calculateLineRanges: before=${beforeLines.length} lines, after=${afterLines.length} lines`);
+  console.log(`[Nami] Added: ${Array.from(addedLines).join(', ') || 'none'}`);
+  console.log(`[Nami] Removed: ${Array.from(removedLines).join(', ') || 'none'}`);
   
   return { 
     addedLines: Array.from(addedLines), 
@@ -545,24 +545,24 @@ function calculateLineRanges(
 
 export function activate(context: vscode.ExtensionContext) {
   try {
-    const controller = new KlyrExtensionController(context);
+    const controller = new NamiExtensionController(context);
     const logger = new Logger('info');
 
-    logger.debug('Klyr extension activating...');
+    logger.debug('Nami extension activating...');
     void controller.ensureOllamaServerStartedOnFirstLaunch();
 
     context.subscriptions.push(
-      vscode.commands.registerCommand('klyr.openChat', () => controller.openChat()),
-      vscode.commands.registerCommand('klyr.fixCurrentFile', () =>
+      vscode.commands.registerCommand('nami.openChat', () => controller.openChat()),
+      vscode.commands.registerCommand('nami.fixCurrentFile', () =>
         controller.runCurrentFileAction('Fix issues in')
       ),
-      vscode.commands.registerCommand('klyr.refactorCurrentFile', () =>
+      vscode.commands.registerCommand('nami.refactorCurrentFile', () =>
         controller.runCurrentFileAction('Refactor')
       ),
-      vscode.commands.registerCommand('klyr.optimizeCurrentFile', () =>
+      vscode.commands.registerCommand('nami.optimizeCurrentFile', () =>
         controller.runCurrentFileAction('Optimize')
       ),
-      vscode.commands.registerCommand('klyr.viewDiffInEditor', () =>
+      vscode.commands.registerCommand('nami.viewDiffInEditor', () =>
         controller.viewDiffInEditor()
       ),
       vscode.languages.registerInlineCompletionItemProvider(
@@ -580,13 +580,13 @@ export function activate(context: vscode.ExtensionContext) {
       ),
       // Register the sidebar chat view provider
       vscode.window.registerWebviewViewProvider(
-        KlyrChatViewProvider.viewType,
-        new KlyrChatViewProvider(context, controller),
+        NamiChatViewProvider.viewType,
+        new NamiChatViewProvider(context, controller),
         { webviewOptions: { retainContextWhenHidden: true } }
       ),
       vscode.window.registerWebviewViewProvider(
-        KlyrLauncherViewProvider.viewType,
-        new KlyrLauncherViewProvider(controller),
+        NamiLauncherViewProvider.viewType,
+        new NamiLauncherViewProvider(controller),
         { webviewOptions: { retainContextWhenHidden: false } }
       )
     );
@@ -608,15 +608,15 @@ export function activate(context: vscode.ExtensionContext) {
       })
     );
 
-    logger.debug('Klyr extension activated successfully');
+    logger.debug('Nami extension activated successfully');
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error(`[Klyr] Activation failed: ${errorMsg}`);
-    vscode.window.showErrorMessage(`Klyr activation failed: ${errorMsg}`);
+    console.error(`[Nami] Activation failed: ${errorMsg}`);
+    vscode.window.showErrorMessage(`Nami activation failed: ${errorMsg}`);
   }
 }
 
-class KlyrExtensionController {
+class NamiExtensionController {
   private readonly extensionContext: vscode.ExtensionContext;
   private readonly logger = new Logger('info');
   private readonly memory = new InMemoryStore();
@@ -784,11 +784,11 @@ class KlyrExtensionController {
   ): Promise<void> {
     try {
       await this.ensureChatPanelOnRightSide();
-      await vscode.commands.executeCommand('workbench.action.openView', 'klyr.chatView', true);
+      await vscode.commands.executeCommand('workbench.action.openView', 'nami.chatView', true);
       await vscode.commands.executeCommand('workbench.action.focusPanel');
     } catch (error) {
       this.logger.warn(
-        `Failed to reveal right-side Klyr chat view: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to reveal right-side Nami chat view: ${error instanceof Error ? error.message : String(error)}`
       );
     }
 
@@ -815,7 +815,7 @@ class KlyrExtensionController {
     const workspaceRoot = getWorkspaceRoot();
 
     if (!editor || !filePath || !workspaceRoot) {
-      vscode.window.showInformationMessage('Open a workspace file before running a Klyr file action.');
+      vscode.window.showInformationMessage('Open a workspace file before running a Nami file action.');
       return;
     }
 
@@ -904,7 +904,7 @@ class KlyrExtensionController {
         new vscode.InlineCompletionItem(suggestion, new vscode.Range(position, position)),
       ]);
     } catch (error) {
-      this.logger.warn('Inline completion failed', error);
+      this.logger.warn(`Inline completion failed: ${error instanceof Error ? error.message : String(error)}`);
       return new vscode.InlineCompletionList([]);
     }
   }
@@ -975,7 +975,7 @@ class KlyrExtensionController {
     }
 
     if (typedMessage.type === 'settings:open') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', 'klyr');
+      await vscode.commands.executeCommand('workbench.action.openSettings', 'nami');
     }
 
     if (typedMessage.type === 'chat:clear') {
@@ -1172,12 +1172,22 @@ class KlyrExtensionController {
     this.setStatus('planning', 'Preparing plan from current workspace context.');
     this.syncWebview();
 
-    const commandResult = await this.tryExecutePromptCommands(runtime, userPrompt, requestId);
+const commandResult = await this.tryExecutePromptCommands(runtime, userPrompt, requestId);
     if (commandResult.handled) {
       await this.persistState();
       this.syncWebview();
       return;
     }
+
+    const readResult = await this.tryHandleReadIntent(userPrompt, runtime, requestId);
+    if (readResult) {
+      await this.persistState();
+      this.syncWebview();
+      return;
+    }
+
+    this.setStatus('planning', 'Preparing plan from current workspace context.');
+    this.syncWebview();
 
     if (commandResult.continuationRoot) {
       const scopedRuntime = await this.buildRuntimeContext(commandResult.continuationRoot);
@@ -1216,9 +1226,9 @@ class KlyrExtensionController {
 
       if (contextResponse.formattedContext.trim()) {
         const orchestratedDocument: ContextDocument = {
-          id: `klyr-orchestrated-${Date.now()}`,
-          uri: `${runtime.workspaceRoot.replace(/\\/g, '/')}/.klyr/context`,
-          title: 'klyr-orchestrated-context',
+          id: `nami-orchestrated-${Date.now()}`,
+          uri: `${runtime.workspaceRoot.replace(/\\/g, '/')}/.nami/context`,
+          title: 'nami-orchestrated-context',
           content: contextResponse.formattedContext,
           updatedAt: Date.now(),
           source: 'memory',
@@ -1451,7 +1461,7 @@ class KlyrExtensionController {
 
   private async openDiffInEditor(preview: DiffPreview, workspaceRoot: string): Promise<void> {
     // Open VS Code's built-in diff viewer for each change
-    const tempDir = path.join(workspaceRoot, '.klyr-temp');
+    const tempDir = path.join(workspaceRoot, '.nami-temp');
     
     try {
       await fs.mkdir(tempDir, { recursive: true });
@@ -1493,7 +1503,7 @@ class KlyrExtensionController {
       // If it's an update (has original), open diff
       if (change.originalContent && change.operation === 'update') {
         await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, 
-          `${change.path} - Klyr Changes`,
+          `${change.path} - Nami Changes`,
           { viewColumn: vscode.ViewColumn.Two }
         );
       }
@@ -1624,8 +1634,8 @@ class KlyrExtensionController {
           change.originalContent,
           change.proposedContent
         );
-        console.log(`[Klyr] Storing decorations for: ${filePath}`);
-        console.log(`[Klyr] Added lines: [${addedLines.join(', ')}], Removed lines: [${removedLines.join(', ')}]`);
+        console.log(`[Nami] Storing decorations for: ${filePath}`);
+        console.log(`[Nami] Added lines: [${addedLines.join(', ')}], Removed lines: [${removedLines.join(', ')}]`);
         fileChangeDecorations.set(filePath, {
           addedLines,
           removedLines,
@@ -1739,7 +1749,7 @@ class KlyrExtensionController {
             const doc = await vscode.workspace.openTextDocument(fullPath);
             await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false });
           } catch (error) {
-            console.error(`[Klyr] Failed to open changed file ${fullPath}:`, error);
+            console.error(`[Nami] Failed to open changed file ${fullPath}:`, error);
           }
         }
         this.setStatus('idle', 'Execution finished.');
@@ -2199,7 +2209,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     await this.persistState();
   }
 
-  private createPipeline(ollamaOverrides: Partial<KlyrConfig['ollama']> = {}): Pipeline {
+  private createPipeline(ollamaOverrides: Partial<NamiConfig['ollama']> = {}): Pipeline {
     const config = this.getConfig();
     const effectiveOllamaConfig = {
       ...config.ollama,
@@ -2227,8 +2237,8 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
   }
 
   private createCoder(
-    config: KlyrConfig,
-    ollamaOverrides: Partial<KlyrConfig['ollama']> = {}
+    config: NamiConfig,
+    ollamaOverrides: Partial<NamiConfig['ollama']> = {}
   ): OllamaCoder {
     const effectiveOllamaConfig = {
       ...config.ollama,
@@ -2529,6 +2539,138 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     return implementationSignals.some((signal) => lower.includes(signal));
   }
 
+  private isReadIntent(prompt: string): { files: string[]; isRead: boolean } {
+    const lower = prompt.toLowerCase().trim();
+    const readPatterns = [
+      /^read\s+(.+)/,
+      /^show\s+(.+)/,
+      /^display\s+(.+)/,
+      /^what('s| is| are)?\s+in\s+(.+)/,
+      /^list\s+(.+)/,
+      /^cat\s+(.+)/,
+      /^get\s+(.+)/,
+    ];
+    for (const pattern of readPatterns) {
+      const match = lower.match(pattern);
+      if (match && match[1]) {
+        const pathPart = match[1].trim();
+        if (pathPart && !pathPart.startsWith('to') && !pathPart.startsWith('the')) {
+          return { files: [pathPart], isRead: true };
+        }
+      }
+    }
+    if (/^(read|show|display|cat|list|get|what('s| is| are)?)\s+\S+/i.test(prompt)) {
+      return { files: [], isRead: true };
+    }
+    return { files: [], isRead: false };
+  }
+
+  private async tryHandleReadIntent(
+    prompt: string,
+    runtime: RuntimeContext,
+    requestId: number
+  ): Promise<boolean> {
+    const { files, isRead } = this.isReadIntent(prompt);
+    if (!isRead || requestId !== this.requestSerial) {
+      return false;
+    }
+
+    try {
+      const path = require('path');
+      const fs = require('fs/promises');
+      const workspaceRoot = runtime.workspaceRoot;
+
+      let targetFiles: string[] = [];
+      
+      if (files.length > 0 && files[0].trim()) {
+        const relPath = files[0].trim();
+        const absolutePath = path.isAbsolute(relPath) ? relPath : path.join(workspaceRoot, relPath);
+        try {
+          const stat = await fs.stat(absolutePath);
+          if (stat.isFile()) {
+            targetFiles = [absolutePath];
+          } else if (stat.isDirectory()) {
+            const entries = await fs.readdir(absolutePath);
+            targetFiles = entries
+              .filter((e: string) => !e.startsWith('.'))
+              .slice(0, 20)
+              .map((e: string) => path.join(absolutePath, e));
+          }
+        } catch {
+          const entries = await fs.readdir(workspaceRoot);
+          const matching = entries.filter((e: string) => 
+            e.toLowerCase().includes(relPath.toLowerCase()) ||
+            e.toLowerCase().replace(/\./g, '').includes(relPath.toLowerCase().replace(/\./g, ''))
+          );
+          if (matching.length > 0) {
+            targetFiles = matching.slice(0, 10).map((e: string) => path.join(workspaceRoot, e));
+          }
+        }
+      } else if (prompt.toLowerCase().match(/\bpackage\.json|\breadme\.md|\btsconfig\.json|\b\.env\b/i)) {
+        const commonFiles = ['package.json', 'README.md', 'tsconfig.json', '.env', '.gitignore'];
+        for (const f of commonFiles) {
+          if (prompt.toLowerCase().includes(f.toLowerCase())) {
+            const fp = path.join(workspaceRoot, f);
+            try {
+              await fs.access(fp);
+              targetFiles.push(fp);
+            } catch {}
+          }
+        }
+      }
+
+      if (targetFiles.length === 0) {
+        return false;
+      }
+
+this.setStatus('reading', `Reading ${targetFiles.length} file(s)...`);
+      this.syncWebview();
+
+      const results: string[] = [];
+      
+      for (const filePath of targetFiles.slice(0, 5)) {
+        if (requestId !== this.requestSerial) return true;
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          const relativePath = path.relative(workspaceRoot, filePath);
+          const lines = content.split('\n').length;
+          const isLarge = lines > 80;
+          
+          const escapeHtml = (text: string): string => {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          };
+          const escapedContent = escapeHtml(content);
+          
+          let displayed: string;
+          if (isLarge) {
+            displayed = '<details>\n<summary><strong>Click to expand (' + lines + ' lines)</strong></summary>\n\n<pre><code>\n' + escapedContent + '\n</code></pre>\n</details>';
+          } else {
+            displayed = '<pre><code>\n' + escapedContent + '\n</code></pre>';
+          }
+          
+          results.push('## ' + relativePath + ' (' + lines + ' lines)\n\n' + displayed);
+        } catch (err) {
+          const relativePath = path.relative(workspaceRoot, filePath);
+          results.push('## ' + relativePath + '\n*Could not read: ' + (err instanceof Error ? err.message : 'Unknown error') + '*');
+        }
+      }
+
+      if (results.length > 0) {
+        this.state.contextRefs = targetFiles.slice(0, 5).map((fp) => ({
+          path: path.relative(workspaceRoot, fp),
+          source: 'read',
+        }));
+      }
+
+      if (requestId !== this.requestSerial) return true;
+      this.appendMessage('assistant', results.join('\n\n'));
+      this.setStatus('idle', 'Read complete. Ask me to explain or modify.');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private isTimeoutErrorMessage(message: string | undefined): boolean {
     if (!message) {
       return false;
@@ -2614,7 +2756,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     if (/\bgit\b|\bcommit\b|\bpush\b|\bnpm\b|\byarn\b|\bpnpm\b/i.test(lower)) {
       const commands: string[] = [];
       if (/\bcommit\b/i.test(lower) || /\bpush\b/i.test(lower)) {
-        const message = this.extractCommitMessage(prompt) ?? 'chore: update via klyr';
+        const message = this.extractCommitMessage(prompt) ?? 'chore: update via nami';
         commands.push('git add -A');
         commands.push(`git commit -m "${message.replace(/"/g, '\\"')}"`);
       }
@@ -2905,7 +3047,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
   private async buildImageAnalysisDocument(
     prompt: string,
     images: ChatImageAttachment[],
-    config: KlyrConfig
+    config: NamiConfig
   ): Promise<ContextDocument | undefined> {
     const base64Images = images
       .map((image) => this.extractBase64ImageData(image.dataUrl))
@@ -2947,8 +3089,8 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
       }
 
       return {
-        id: `klyr-image-analysis-${Date.now()}`,
-        uri: 'klyr://attachments/image-analysis',
+        id: `nami-image-analysis-${Date.now()}`,
+        uri: 'nami://attachments/image-analysis',
         title: 'image-analysis',
         content,
         updatedAt: Date.now(),
@@ -3010,9 +3152,9 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
         : '- No external source resolved.';
 
     return {
-      id: `klyr-grounding-policy-${Date.now()}`,
-      uri: 'klyr://grounding/policy',
-      title: 'klyr-grounding-policy',
+      id: `nami-grounding-policy-${Date.now()}`,
+      uri: 'nami://grounding/policy',
+      title: 'nami-grounding-policy',
       content: [
         'Grounding requirements for this response:',
         '1. Use only facts present in workspace context and retrieved RAG sources.',
@@ -3032,9 +3174,9 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     const lines = references.length > 0 ? references.map((entry) => `- ${entry}`) : ['- none'];
 
     return {
-      id: `klyr-mcp-policy-${Date.now()}`,
-      uri: 'klyr://mcp/policy',
-      title: 'klyr-mcp-policy',
+      id: `nami-mcp-policy-${Date.now()}`,
+      uri: 'nami://mcp/policy',
+      title: 'nami-mcp-policy',
       content: [
         'MCP tool grounding policy:',
         '1. Prefer MCP tool output when it directly answers the question.',
@@ -3298,7 +3440,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'Klyr-VSCode-Extension/1.0',
+          'User-Agent': 'Nami-VSCode-Extension/1.0',
         },
         signal: controller.signal,
       });
@@ -3456,7 +3598,7 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
   private async backupFile(filePath: string): Promise<string | null> {
     try {
       const content = await fs.readFile(filePath, 'utf-8');
-      const backupPath = `${filePath}.klyr.backup.${Date.now()}`;
+      const backupPath = `${filePath}.nami.backup.${Date.now()}`;
       await fs.writeFile(backupPath, content, 'utf-8');
       return backupPath;
     } catch {
@@ -3468,11 +3610,11 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     try {
       const files = await fs.readdir(workspaceRoot);
       for (const file of files) {
-        if (!file.includes('.klyr.backup.')) {
+        if (!file.includes('.nami.backup.')) {
           continue;
         }
 
-        const parts = file.split('.klyr.backup.');
+        const parts = file.split('.nami.backup.');
         if (parts.length < 2) {
           continue;
         }
@@ -3766,9 +3908,9 @@ Schema: {"summary": "what was fixed", "changes": [{"path": "file", "operation": 
     await this.extensionContext.workspaceState.update(MEMORY_STATE_KEY, this.memory.getEntries());
   }
 
-  private getConfig(): KlyrConfig {
+  private getConfig(): NamiConfig {
     const defaults = defaultConfig();
-    const config = vscode.workspace.getConfiguration('klyr');
+    const config = vscode.workspace.getConfiguration('nami');
     const configuredMcpServers = config.get<Array<Record<string, unknown>>>(
       'mcp.servers',
       defaults.mcp.servers as unknown as Array<Record<string, unknown>>

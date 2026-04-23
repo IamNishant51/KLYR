@@ -1,4 +1,5 @@
-import type { Coder, CoderInput, CodeDraft } from './coder';
+import { CodeDraft } from './coder';
+import type { Coder, CoderInput } from './coder';
 import type { Validator, ValidationError, ValidatorInput } from './validator';
 export interface FixerInput {
     coder: Coder;

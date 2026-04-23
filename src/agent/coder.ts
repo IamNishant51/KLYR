@@ -1,5 +1,6 @@
 import type { PlanResult } from './planner';
 import type { ValidationError } from './validator';
+import type { ToolUseRequest } from './tools';
 
 export interface CoderContextFile {
   path: string;
@@ -32,6 +33,10 @@ export interface CoderInput {
   context: CoderContext;
   deterministic: boolean;
   validationErrors?: ValidationError[];
+  toolHistory?: Array<{
+    request: ToolUseRequest;
+    result: any;
+  }>;
 }
 
 export interface DraftFileChange {
@@ -73,19 +78,27 @@ export interface InlineCompletionInput {
   deterministic: boolean;
 }
 
+export type CoderResponse = 
+  | { type: 'draft'; draft: CodeDraft }
+  | { type: 'answer'; answer: CoderAnswer }
+  | { type: 'tool_use'; requests: ToolUseRequest[] };
+
 export interface Coder {
-  generate(input: CoderInput): Promise<CodeDraft>;
+  generate(input: CoderInput): Promise<CoderResponse>;
   answer(input: CoderInput, onChunk?: (chunk: string) => void): Promise<CoderAnswer>;
   completeInline(input: InlineCompletionInput): Promise<string>;
 }
 
 export class NoopCoder implements Coder {
-  async generate(_: CoderInput): Promise<CodeDraft> {
+  async generate(_: CoderInput): Promise<CoderResponse> {
     return {
-      changes: [],
-      summary: 'No changes generated.',
-      rationale: 'Code generation not implemented yet.',
-      followUpQuestions: [],
+      type: 'draft',
+      draft: {
+        changes: [],
+        summary: 'No changes generated.',
+        rationale: 'Code generation not implemented yet.',
+        followUpQuestions: [],
+      }
     };
   }
 

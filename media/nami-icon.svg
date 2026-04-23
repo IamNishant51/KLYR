@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="pinkGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F472B6;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#E879F9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#C026D3;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#0F0F0F" stroke="url(#pinkGlow)" stroke-width="2"/>
+  
+  <!-- Inner glow ring -->
+  <circle cx="64" cy="64" r="52" fill="none" stroke="url(#pinkGlow)" stroke-width="1" opacity="0.5"/>
+  
+  <!-- N letter stylized -->
+  <path d="M 38 32 L 38 96 L 48 96 L 48 68 L 80 96 L 92 96 L 92 32 L 82 32 L 82 58 L 50 32 L 38 32 Z" 
+        fill="url(#pinkGlow)" 
+        filter="url(#glow)"/>
+  
+  <!-- AI sparkle accents -->
+  <circle cx="95" cy="28" r="4" fill="#E879F9" opacity="0.8"/>
+  <circle cx="100" cy="38" r="2" fill="#F472B6" opacity="0.6"/>
+  <circle cx="28" cy="95" r="3" fill="#C026D3" opacity="0.7"/>
+  <circle cx="22" cy="85" r="2" fill="#E879F9" opacity="0.5"/>
+</svg>

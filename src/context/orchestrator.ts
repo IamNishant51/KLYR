@@ -1,6 +1,6 @@
 import { CodeChunker, CodeChunk } from './chunker';
 import { Summarizer, FileSummary, FolderSummary, ProjectSummary } from './summarizer';
-import { ContextOptimizer, ContextBudget, OptimizedContext } from './optimizer';
+import { calculateTokenBudget, truncateText, compressContext, prioritizeDocuments, summarizeForContext, type ContextDoc } from './optimizer';
 import { RAGRetriever, RetrievalResult } from './ragRetriever';
 import { MemoryManager, MemoryEntry } from './memoryManager';
 import * as fs from 'fs';
@@ -40,7 +40,7 @@ export interface ContextResponse {
 export class ContextOrchestrator {
   private chunker: CodeChunker;
   private summarizer: Summarizer;
-  private optimizer: ContextOptimizer;
+  private optimizer: any;
   private retriever: RAGRetriever;
   private memory: MemoryManager;
   private config: Required<ContextOrchestrationConfig>;
@@ -48,7 +48,7 @@ export class ContextOrchestrator {
   constructor(config: ContextOrchestrationConfig = {}) {
     this.chunker = new CodeChunker();
     this.summarizer = new Summarizer();
-    this.optimizer = new ContextOptimizer();
+    this.optimizer = null;
     this.retriever = new RAGRetriever();
     this.memory = new MemoryManager();
 

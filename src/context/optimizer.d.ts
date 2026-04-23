@@ -1,63 +1,23 @@
-import type { CodeChunk } from './chunker';
-export interface ContextBudget {
-    totalTokens: number;
-    availableTokens: number;
-    systemPromptTokens: number;
-    conversationTokens: number;
-    contextTokens: number;
-    responseBuffer: number;
+export interface TokenBudget {
+    maxTokens: number;
+    systemPrompt: number;
+    history: number;
+    context: number;
+    reserved: number;
 }
-export interface OptimizedContext {
-    chunks: CodeChunk[];
-    summaries: string[];
-    conversation: Array<{
-        role: string;
-        content: string;
-    }>;
-    totalTokens: number;
-    efficiency: number;
-    warnings: string[];
+export declare function calculateTokenBudget(maxTokens: number, options?: {
+    hasSystemPrompt?: boolean;
+    historyMessages?: number;
+    priorityContext?: number;
+}): TokenBudget;
+export declare function truncateText(text: string, maxTokens: number): string;
+export declare function compressContext(docs: ContextDoc[]): ContextDoc[];
+export interface ContextDoc {
+    id: string;
+    uri: string;
+    content: string;
+    source?: string;
+    relevanceScore?: number;
 }
-export declare class ContextOptimizer {
-    private tokenCountEstimation;
-    /**
-     * Calculate token count (rough estimation)
-     */
-    estimateTokens(text: string): number;
-    /**
-     * Create context budget for LLM request
-     * Conservative: Leave 20% buffer for response
-     */
-    createBudget(modelContextWindow?: number, responseBufferPercent?: number): ContextBudget;
-    /**
-     * CRITICAL: Optimize and validate context before sending to LLM
-     * Ensures we NEVER exceed token limit
-     */
-    optimizeContext(chunks: CodeChunk[], summaries: string[], conversation: Array<{
-        role: string;
-        content: string;
-    }>, budget: ContextBudget): OptimizedContext;
-    /**
-     * Validate context before sending to LLM
-     * Ensures high signal-to-noise ratio
-     */
-    validateContext(context: OptimizedContext, budget: ContextBudget): boolean;
-    /**
-     * Select most relevant chunks based on scoring
-     */
-    private selectRelevantChunks;
-    /**
-     * Score a chunk for relevance
-     * Higher score = more relevant
-     */
-    private scoreChunk;
-    /**
-     * Truncate summaries to fit token budget
-     */
-    private truncateSummaries;
-    /**
-     * Build final context string for LLM
-     * Ensures proper formatting and signal
-     */
-    buildContextString(optimized: OptimizedContext): string;
-}
+export declare function prioritizeDocuments(docs: ContextDoc[], maxCount: number, query?: string): ContextDoc[];
+export declare function summarizeForContext(text: string, maxLines?: number): string;

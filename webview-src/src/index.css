@@ -4,481 +4,352 @@
 
 @layer base {
   :root {
-    color-scheme: light dark;
-    --k-bg: var(--vscode-editor-background, #1e1e1e);
-    --k-fg: var(--vscode-editor-foreground, #d4d4d4);
-    --k-muted: var(--vscode-descriptionForeground, #9da0a6);
-    --k-border: var(--vscode-panel-border, rgba(127, 127, 127, 0.35));
-    --k-surface: var(--vscode-editorWidget-background, #252526);
-    --k-surface-2: var(--vscode-sideBar-background, #252526);
-    --k-input-bg: var(--vscode-input-background, #3c3c3c);
-    --k-input-fg: var(--vscode-input-foreground, #cccccc);
-    --k-input-border: var(--vscode-input-border, rgba(127, 127, 127, 0.35));
-    --k-accent: var(--vscode-focusBorder, #007fd4);
-    --k-button-bg: var(--vscode-button-background, #0e639c);
-    --k-button-fg: var(--vscode-button-foreground, #ffffff);
-    --k-button-hover: var(--vscode-button-hoverBackground, #1177bb);
-    --k-selection: var(--vscode-list-activeSelectionBackground, rgba(14, 99, 156, 0.35));
+    color-scheme: dark;
+    
+    /* Nami Pink Dark Theme - Premium Copilot-like */
+    --nami-bg: #0d0d0f;
+    --nami-fg: #fafafa;
+    --nami-muted: #71717a;
+    --nami-border: #27272a;
+    --nami-surface: #18181b;
+    --nami-surface-2: #27272a;
+    --nami-input-bg: #18181b;
+    --nami-input-fg: #fafafa;
+    --nami-input-border: #3f3f46;
+    
+    /* Pink accent colors - Vibrant */
+    --nami-primary: #e879f9;
+    --nami-primary-dark: #c026d3;
+    --nami-primary-light: #f0abfc;
+    --nami-accent: #f472b6;
+    --nami-success: #22c55e;
+    --nami-danger: #ef4444;
+    --nami-warning: #f59e0b;
+    --nami-button-bg: #c026d3;
+    --nami-button-fg: #ffffff;
+    --nami-button-hover: #e879f9;
+    --nami-selection: rgba(232, 121, 249, 0.15);
+    
+    /* Gradients */
+    --nami-gradient: linear-gradient(135deg, #e879f9 0%, #c026d3 50%, #a855f7 100%);
+    --nami-gradient-subtle: linear-gradient(135deg, rgba(232, 121, 249, 0.08) 0%, rgba(192, 38, 211, 0.08) 100%);
+    
+    /* Glow effects */
+    --nami-glow: 0 0 20px rgba(232, 121, 249, 0.3), 0 0 40px rgba(232, 121, 249, 0.15);
+    --nami-glow-text: 0 0 20px rgba(232, 121, 249, 0.5);
+    
+    /* Font families */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
   }
 
-  html {
-    background: var(--k-bg);
-    color: var(--k-fg);
-  }
-
-  body,
-  #root {
-    @apply min-h-screen;
+  * {
+    box-sizing: border-box;
   }
 
   body {
-    font-family: "Segoe UI", "SF Pro Text", "Inter", ui-sans-serif, system-ui, sans-serif;
-    background: var(--k-bg);
+    font-family: var(--font-sans);
+    background: var(--nami-bg);
+    color: var(--nami-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+  }
+
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  /* Custom scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--nami-surface-2) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--nami-surface-2);
+    border-radius: 3px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--nami-muted);
   }
 }
 
 @layer components {
-  .klyr-shell {
+  .nami-shell {
     @apply flex h-screen w-full flex-col overflow-hidden;
-    color: var(--k-fg);
-    background: linear-gradient(180deg, color-mix(in srgb, var(--k-bg) 96%, #000 4%) 0%, var(--k-bg) 100%);
+    background: var(--nami-bg);
   }
 
-  .klyr-fade-up {
-    animation: klyr-fade-up 0.2s ease-out;
-    will-change: opacity, transform;
+  .nami-scrollbar {
+    scrollbar-gutter: stable;
   }
 
-  .klyr-scrollbar {
-    -ms-overflow-style: auto;
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--k-muted) 45%, transparent) transparent;
-  }
-
-  .klyr-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-    display: block;
-  }
-
-  .klyr-scrollbar::-webkit-scrollbar-thumb {
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--k-muted) 45%, transparent);
-  }
-
-  .klyr-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .klyr-action-button {
-    background: var(--k-button-bg);
-    color: var(--k-button-fg);
-    border: 1px solid color-mix(in srgb, var(--k-button-bg) 65%, var(--k-border));
-    box-shadow: none;
-    transition:
-      background-color 0.12s ease,
-      border-color 0.12s ease,
-      filter 0.12s ease;
-    will-change: transform;
-  }
-
-  .klyr-action-button:hover {
-    background: var(--k-button-hover);
-    border-color: color-mix(in srgb, var(--k-button-hover) 70%, var(--k-border));
-    filter: brightness(1.04);
-  }
-
-  .klyr-action-button:active {
-    filter: brightness(0.98);
-  }
-
-  .klyr-secondary-button {
-    border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 58%, transparent);
-    color: var(--k-input-fg);
-    transition:
-      background-color 0.16s ease,
-      border-color 0.16s ease,
-      color 0.16s ease;
-    will-change: transform;
-  }
-
-  .klyr-secondary-button:hover {
-    border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 42%, transparent);
-    color: var(--k-fg);
-  }
-
-  .klyr-secondary-button:active {
-    filter: brightness(0.98);
-  }
-
-  .klyr-inline-button {
-    @apply rounded-full px-3 py-1.5 text-[11px] font-medium;
-    color: var(--k-input-fg);
-    border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 55%, transparent);
-    transition:
-      background-color 0.16s ease,
-      border-color 0.16s ease,
-      color 0.16s ease;
-    will-change: transform;
-  }
-
-  .klyr-inline-button:hover {
-    border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 40%, transparent);
-    color: var(--k-fg);
-  }
-
-  .klyr-inline-button:active {
-    filter: brightness(0.98);
-  }
-
-  .klyr-icon-button {
-    @apply flex h-10 w-10 items-center justify-center rounded-full;
-    color: var(--k-muted);
-    border: 1px solid var(--k-input-border);
-    background: color-mix(in srgb, var(--k-input-bg) 52%, transparent);
-    transition:
-      background-color 0.16s ease,
-      border-color 0.16s ease,
-      color 0.16s ease;
-    will-change: transform;
-  }
-
-  .klyr-icon-button:hover {
-    border-color: var(--k-accent);
-    background: color-mix(in srgb, var(--k-selection) 38%, transparent);
-    color: var(--k-fg);
-  }
-
-  .klyr-icon-button:active {
-    filter: brightness(0.98);
-  }
-
-  .klyr-cursor {
-    @apply inline-block h-4 w-[7px] rounded-full;
-    background: var(--vscode-editorCursor-foreground, #aeafad);
-    animation: klyr-caret 1s steps(2, start) infinite;
-  }
-
-  .klyr-virtual-row {
-    content-visibility: auto;
-  }
-
-  .klyr-welcome-card {
-    border: 1px solid color-mix(in srgb, var(--k-border) 80%, transparent);
-    background: color-mix(in srgb, var(--k-surface) 86%, transparent);
-    box-shadow: 0 6px 20px color-mix(in srgb, var(--k-bg) 60%, transparent);
-    animation: klyr-fade-up 0.24s ease-out;
-  }
-
-  .klyr-welcome-badge {
-    border: 1px solid color-mix(in srgb, var(--k-accent) 40%, transparent);
-    color: color-mix(in srgb, var(--k-fg) 92%, var(--k-accent) 8%);
-    background: color-mix(in srgb, var(--k-selection) 58%, transparent);
-  }
-
-  .klyr-welcome-shimmer {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .klyr-welcome-shimmer::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    transform: translateX(-120%);
-    background: linear-gradient(
-      110deg,
-      transparent 0%,
-      color-mix(in srgb, var(--k-accent) 22%, transparent) 45%,
-      transparent 70%
-    );
-    animation: klyr-shimmer 2.8s ease-in-out infinite;
-    pointer-events: none;
-  }
-}
-
-@keyframes klyr-fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(14px) scale(0.995);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes klyr-welcome-glow {
-  0%,
-  100% {
-    box-shadow: 0 20px 48px color-mix(in srgb, var(--k-bg) 64%, transparent);
-  }
-  50% {
-    box-shadow:
-      0 24px 56px color-mix(in srgb, var(--k-bg) 54%, transparent),
-      0 0 0 1px color-mix(in srgb, var(--k-accent) 22%, transparent) inset;
-  }
-}
-
-@keyframes klyr-shimmer {
-  0%,
-  16% {
-    transform: translateX(-120%);
-  }
-  48%,
-  100% {
-    transform: translateX(130%);
-  }
-}
-
-@keyframes klyr-pulse {
-  0%,
-  100% {
-    opacity: 0.5;
-    transform: scale(0.98);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-}
-
-@keyframes klyr-caret {
-  0%,
-  40% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes klyr-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-6px);
-  }
-}
-
-@keyframes klyr-slide-in-right {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes klyr-slide-in-left {
-  from {
-    opacity: 0;
-    transform: translateX(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes klyr-scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes klyr-glow {
-  0%, 100% {
-    box-shadow: 0 0 20px color-mix(in srgb, var(--k-accent) 20%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 40px color-mix(in srgb, var(--k-accent) 40%, transparent);
-  }
-}
-
-@keyframes klyr-gradient-shift {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-@keyframes klyr-border-glow {
-  0%, 100% {
-    border-color: color-mix(in srgb, var(--k-accent) 30%, transparent);
-  }
-  50% {
-    border-color: color-mix(in srgb, var(--k-accent) 60%, transparent);
-  }
-}
-
-@keyframes klyr-text-glow {
-  0%, 100% {
-    text-shadow: 0 0 10px color-mix(in srgb, var(--k-accent) 30%, transparent);
-  }
-  50% {
-    text-shadow: 0 0 20px color-mix(in srgb, var(--k-accent) 50%, transparent);
-  }
-}
-
-@keyframes klyr-typing-dot {
-  0%, 60%, 100% {
-    transform: translateY(0);
-    opacity: 0.4;
-  }
-  30% {
-    transform: translateY(-4px);
-    opacity: 1;
-  }
-}
-
-@keyframes klyr-spin-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes klyr-bounce-subtle {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
-@keyframes klyr-fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes klyr-smooth-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-    filter: blur(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-
-@layer utilities {
-  .animate-klyr-pulse {
-    animation: klyr-pulse 1.5s ease-in-out infinite;
-  }
-
-  .animate-klyr-float {
-    animation: klyr-float 3.8s ease-in-out infinite;
-  }
-
-  .animate-klyr-slide-in-right {
-    animation: klyr-slide-in-right 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .animate-klyr-slide-in-left {
-    animation: klyr-slide-in-left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .animate-klyr-scale-in {
-    animation: klyr-scale-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .animate-klyr-glow {
-    animation: klyr-glow 2s ease-in-out infinite;
-  }
-
-  .animate-klyr-border-glow {
-    animation: klyr-border-glow 2s ease-in-out infinite;
-  }
-
-  .animate-klyr-text-glow {
-    animation: klyr-text-glow 2s ease-in-out infinite;
-  }
-
-  .animate-klyr-typing-dot {
-    animation: klyr-typing-dot 1.4s ease-in-out infinite;
-  }
-
-  .animate-klyr-spin-slow {
-    animation: klyr-spin-slow 3s linear infinite;
-  }
-
-  .animate-klyr-bounce-subtle {
-    animation: klyr-bounce-subtle 2s ease-in-out infinite;
-  }
-
-  .animate-klyr-fade-in-up {
-    animation: klyr-fade-in-up 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .animate-klyr-smooth-reveal {
-    animation: klyr-smooth-reveal 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
-  }
-
-  .klyr-hover-lift {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-  }
-
-  .klyr-hover-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px color-mix(in srgb, var(--k-bg) 80%, transparent);
-  }
-
-  .klyr-hover-glow {
-    transition: box-shadow 0.3s ease;
-  }
-
-  .klyr-hover-glow:hover {
-    box-shadow: 0 0 30px color-mix(in srgb, var(--k-accent) 30%, transparent);
-  }
-
-  .klyr-gradient-text {
-    background: linear-gradient(135deg, var(--k-accent), color-mix(in srgb, var(--k-accent) 60%, var(--k-fg)));
+  /* Premium Gradient Text */
+  .nami-text-gradient {
+    background: var(--nami-gradient);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  .klyr-glass {
-    background: color-mix(in srgb, var(--k-surface) 88%, transparent);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+  /* Gradient Background */
+  .nami-gradient {
+    background: var(--nami-gradient);
+  }
+  
+  .nami-gradient-subtle {
+    background: var(--nami-gradient-subtle);
+  }
+  
+  /* Glow effects */
+  .nami-glow {
+    box-shadow: var(--nami-glow);
+  }
+  
+  .nami-glow-text {
+    text-shadow: var(--nami-glow-text);
   }
 
-  .klyr-glass-strong {
-    background: color-mix(in srgb, var(--k-surface) 94%, transparent);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+  /* Premium buttons */
+  .nami-button {
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200;
+    background: var(--nami-button-bg);
+    color: var(--nami-button-fg);
+    border: none;
   }
+
+  .nami-button:hover {
+    background: var(--nami-button-hover);
+  }
+
+  .nami-button-secondary {
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition-all duration-200;
+    background: transparent;
+    border: 1px solid var(--nami-border);
+    color: var(--nami-fg);
+  }
+
+  .nami-button-secondary:hover {
+    background: var(--nami-surface-2);
+    border-color: var(--nami-primary);
+  }
+
+  /* Icon buttons */
+  .nami-icon-button {
+    @apply flex items-center justify-center rounded-lg transition-all duration-150;
+    background: transparent;
+    color: var(--nami-muted);
+  }
+
+  .nami-icon-button:hover {
+    background: var(--nami-surface-2);
+    color: var(--nami-primary);
+  }
+
+  /* Pulse animation */
+  .nami-pulse {
+    animation: nami-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes nami-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Fade in */
+  .nami-fade-in {
+    animation: nami-fade-in 0.3s ease-out;
+  }
+
+  @keyframes nami-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Slide up */
+  .nami-slide-up {
+    animation: nami-slide-up 0.3s ease-out;
+  }
+
+  @keyframes nami-slide-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Message bubbles */
+  .message-user {
+    background: var(--nami-surface-2);
+    border: 1px solid var(--nami-border);
+    border-radius: 16px 16px 4px 16px;
+  }
+
+  .message-assistant {
+    background: transparent;
+    border: none;
+  }
+
+  /* Tool blocks */
+  .tool-block {
+    @apply rounded-lg border overflow-hidden;
+    background: var(--nami-surface);
+    border-color: var(--nami-border);
+  }
+
+  .tool-block-header {
+    @apply flex items-center gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wider;
+    background: rgba(232, 121, 249, 0.08);
+    border-bottom: 1px solid var(--nami-border);
+    color: var(--nami-primary);
+  }
+
+  .tool-block-content {
+    @apply p-3 overflow-x-auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  /* Thinking dots */
+  .thinking-dots {
+    @apply flex gap-1.5;
+  }
+
+  .thinking-dot {
+    @apply w-2 h-2 rounded-full;
+    background: var(--nami-primary);
+    animation: thinking-bounce 1.4s ease-in-out infinite;
+  }
+
+  .thinking-dot:nth-child(1) { animation-delay: 0s; }
+  .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes thinking-bounce {
+    0%, 80%, 100% { transform: scale(1); opacity: 0.5; }
+    40% { transform: scale(1.3); opacity: 1; }
+  }
+
+  @keyframes shimmer-slide {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, var(--nami-surface-2) 25%, var(--nami-surface) 50%, var(--nami-surface-2) 75%);
+    background-size: 200% 100%;
+    animation: shimmer-slide 1.5s ease-in-out infinite;
+  }
+
+  /* Context chips */
+  .context-chip {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs;
+    background: var(--nami-surface);
+    border: 1px solid var(--nami-border);
+    color: var(--nami-muted);
+    transition: all 0.15s;
+  }
+
+  .context-chip:hover {
+    border-color: var(--nami-primary);
+    color: var(--nami-primary);
+  }
+}
+
+/* Markdown content */
+.markdown-content {
+  @apply leading-relaxed;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  @apply font-semibold mt-6 mb-3;
+  color: var(--nami-fg);
+}
+
+.markdown-content h1 { font-size: 1.5em; }
+.markdown-content h2 { font-size: 1.25em; }
+.markdown-content h3 { font-size: 1.1em; }
+
+.markdown-content p {
+  @apply my-3;
+}
+
+.markdown-content code {
+  @apply px-1.5 py-0.5 rounded text-sm;
+  background: var(--nami-surface-2);
+  color: var(--nami-primary);
+  font-family: var(--font-mono);
+}
+
+.markdown-content pre {
+  @apply p-4 rounded-lg overflow-x-auto my-4;
+  background: var(--nami-surface);
+  border: 1px solid var(--nami-border);
+}
+
+.markdown-content pre code {
+  @apply p-0 bg-transparent text-sm;
+  color: var(--nami-fg);
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  @apply my-3 pl-6;
+}
+
+.markdown-content li {
+  @apply my-1;
+}
+
+.markdown-content a {
+  color: var(--nami-primary);
+  @apply no-underline;
+}
+
+.markdown-content a:hover {
+  @apply underline;
+}
+
+.markdown-content blockquote {
+  @apply pl-4 my-4 border-l-4;
+  border-color: var(--nami-primary);
+  color: var(--nami-muted);
+  font-style: italic;
+}
+
+.markdown-content hr {
+  @apply my-6 border-t;
+  border-color: var(--nami-border);
+}
+
+.markdown-content table {
+  @apply w-full my-4 border-collapse;
+}
+
+.markdown-content th,
+.markdown-content td {
+  @apply px-3 py-2 border;
+  border-color: var(--nami-border);
+}
+
+.markdown-content th {
+  @apply font-semibold;
+  background: var(--nami-surface);
+}
+
+/* Syntax highlighting override */
+.hljs {
+  background: transparent !important;
 }

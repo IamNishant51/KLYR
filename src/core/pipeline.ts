@@ -1,5 +1,5 @@
 import type { PlanMode, PlanResult, Planner } from '../agent/planner';
-import type { Coder, CoderAnswer, CoderContext, CoderInput, CodeDraft } from '../agent/coder';
+import type { Coder, CoderAnswer, CoderContext, CoderInput, CodeDraft, CoderResponse } from '../agent/coder';
 import * as path from 'path';
 import { runFixerLoop } from '../agent/fixer';
 import type { DiffPreview, Executor } from '../agent/executor';
@@ -8,6 +8,7 @@ import type { ContextDocument, ContextEngine } from '../context/contextEngine';
 import { formatMemoryForContext, type MemoryStore } from '../context/memory';
 import { summarizeContext, uniqueDocumentsByPath } from '../context/retriever';
 import { Logger } from './config';
+import { ToolExecutor } from '../agent/tools';
 
 export interface PipelineConfig {
   maxAttempts: number;
@@ -76,7 +77,7 @@ export class Pipeline {
     this.logs = [];
     const finalConfig: PipelineConfig = {
       maxAttempts: config.maxAttempts ?? 2,
-      retrievalMaxResults: config.retrievalMaxResults ?? 8,
+      retrievalMaxResults: config.retrievalMaxResults ?? 6,
       allowNewFiles: config.allowNewFiles ?? false,
     };
 
@@ -117,8 +118,8 @@ export class Pipeline {
 
       await this.emitStage(callbacks, 'retrieving', 'Gathering active editor, workspace, and memory context.');
       const indexPromise = this.contextEngine.index(context.documents);
-      const memoryMatchesPromise = this.memory.query(context.prompt, 4);
-      const recentMemoryPromise = this.memory.recent(4);
+      const memoryMatchesPromise = this.memory.query(context.prompt, 2);
+      const recentMemoryPromise = this.memory.recent(2);
 
       await indexPromise;
       const contextMatches = await this.contextEngine.query({
@@ -148,7 +149,7 @@ export class Pipeline {
         memoryMatchesPromise,
         recentMemoryPromise,
       ]);
-      const memoryContext = formatMemoryForContext([...memoryMatches, ...recentMemory].slice(0, 6));
+      const memoryContext = formatMemoryForContext([...memoryMatches, ...recentMemory].slice(0, 4));
       const coderContext = this.buildCoderContext(context, finalDocuments, memoryContext);
       const contextSummary = summarizeContext(finalDocuments);
       const retrievedPreview = finalDocuments
@@ -199,10 +200,52 @@ export class Pipeline {
         'thinking',
         `Generating deterministic edits (${plan.steps.length} planned step${plan.steps.length === 1 ? '' : 's'}) from verified context.`
       );
+
+      // --- AGENTIC LOOP START ---
+      const toolExecutor = new ToolExecutor();
+      const toolHistory: Array<{ request: any; result: any }> = [];
+      let currentDraft: CodeDraft | undefined;
+      let attempts = 0;
+      const maxToolTurns = 10;
+
+      while (attempts < maxToolTurns) {
+        attempts++;
+        const coderInput = this.buildCoderInput(context.prompt, plan, coderContext, toolHistory);
+        const response = await this.coder.generate(coderInput);
+
+        if (response.type === 'draft') {
+          currentDraft = response.draft;
+          break;
+        }
+
+        if (response.type === 'tool_use') {
+          await this.emitStage(callbacks, 'thinking', `AI is using tools to explore codebase... (${attempts}/${maxToolTurns})`);
+          
+          for (const request of response.requests) {
+            this.log(`Tool Call: ${request.toolId} with input ${JSON.stringify(request.input)}`);
+            const result = await toolExecutor.execute(request, context.workspaceRoot);
+            toolHistory.push({ request, result });
+            this.log(`Tool Result: ${JSON.stringify(result)}`);
+          }
+        }
+      }
+
+      if (!currentDraft) {
+        return {
+          ok: false,
+          mode: plan.mode,
+          error: 'AI failed to converge on a draft after maximum tool turns.',
+          plan,
+          retrievedDocuments: finalDocuments,
+          contextSummary,
+          logs: this.logs,
+        };
+      }
+
       const fixerResult = await runFixerLoop({
         coder: this.coder,
         validator: this.validator,
-        initialInput: this.buildCoderInput(context.prompt, plan, coderContext),
+        initialInput: this.buildCoderInput(context.prompt, plan, coderContext, toolHistory),
         workspaceRoot: context.workspaceRoot,
         maxAttempts: finalConfig.maxAttempts,
         validationContext: {
@@ -299,7 +342,7 @@ export class Pipeline {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error.';
       this.log(`Pipeline failed: ${message}`);
-      this.logger.error('Pipeline error', error);
+      this.logger.error(`Pipeline error: ${error instanceof Error ? error.message : String(error)}`);
       return {
         ok: false,
         mode: context.modeHint ?? 'chat',
@@ -311,12 +354,13 @@ export class Pipeline {
     }
   }
 
-  private buildCoderInput(prompt: string, plan: PlanResult, context: CoderContext): CoderInput {
+  private buildCoderInput(prompt: string, plan: PlanResult, context: CoderContext, toolHistory: any[] = []): CoderInput {
     return {
       prompt,
       plan,
       context,
       deterministic: true,
+      toolHistory,
     };
   }
 

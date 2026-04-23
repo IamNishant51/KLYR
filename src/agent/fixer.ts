@@ -1,4 +1,5 @@
-import type { Coder, CoderInput, CodeDraft } from './coder';
+import { CoderResponse, CodeDraft } from './coder';
+import type { Coder, CoderInput } from './coder';
 import type { Validator, ValidationError, ValidatorInput } from './validator';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -32,8 +33,27 @@ export async function runFixerLoop(input: FixerInput): Promise<FixerResult> {
       validationErrors: lastErrors,
     });
 
+    if (draft.type === 'tool_use') {
+      return {
+        ok: false,
+        draft: undefined,
+        errors: [{ code: 'TOOL_USE_INTERRUPT', message: 'Agent requested tool use during fix loop', file: '' }],
+        attempts: attempt,
+      };
+    }
+
+    if (draft.type !== 'draft') {
+      return {
+        ok: false,
+        draft: undefined,
+        errors: [{ code: 'UNEXPECTED_CODER_RESPONSE', message: 'Agent returned non-draft response during fix loop', file: '' }],
+        attempts: attempt,
+      };
+    }
+
+    const actualDraft = draft.draft;
     // Auto-fix content loss BEFORE validation by reading from disk
-    const fixedDraft = await fixContentLossFromDisk(draft, input.workspaceRoot, input.initialInput.prompt);
+    const fixedDraft = await fixContentLossFromDisk(actualDraft, input.workspaceRoot, input.initialInput.prompt);
 
     const validation = await input.validator.validate({
       draft: fixedDraft,

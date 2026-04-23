@@ -167,7 +167,7 @@ function App() {
     startTransition(() => {
       setMessages((prevMessages) => [...prevMessages, optimisticMessage]);
       setExtensionStatus('thinking');
-      setStatusDetail('Handing your request to Klyr.');
+      setStatusDetail('Handing your request to Nami.');
       setThinkingTrace([]);
     });
     lastThinkingKeyRef.current = '';
@@ -270,12 +270,12 @@ function App() {
   };
 
   const handleOpenDiff = () => {
-    const diffSection = document.getElementById('klyr-diff-preview');
+    const diffSection = document.getElementById('nami-diff-preview');
     diffSection?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   return (
-    <div ref={rootRef} className="klyr-shell h-screen w-full">
+    <div ref={rootRef} className="nami-shell h-screen w-full">
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <ChatPanel
           messages={deferredMessages}
